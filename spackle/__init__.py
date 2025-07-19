@@ -14,6 +14,9 @@ from typing import Protocol
 from pydantic import BaseModel
 from fastmcp import FastMCP
 
+from .probe import ProbeServer
+from .sqlite import SqliteServer
+
 @dataclass
 class Paths:
   file: str = field(init=False)
@@ -36,7 +39,10 @@ class Paths:
 class Spackle:
   def __init__(self):
     self.paths = Paths()
+
     self.mcp = FastMCP("spackle")
+    self.mcps = {}
+
     self.tools = {}
     self.tool(Spackle.build)
     self.tool(Spackle.run)
@@ -46,33 +52,47 @@ class Spackle:
     self.tools[fn.__name__] = fn
     self.mcp.tool(fn)
 
+  def call(self, tool: str):
+    return self.tools[tool]()
+
+  def serve(self):
+    self.mcp.run()
+
   @staticmethod
   def build() -> str:
-    return 'build'
+    """Build the project"""
+    return 'build_project'
 
   @staticmethod
   def run() -> str:
-    return 'run'
+    """Run the project"""
+    return 'run_project'
 
   @staticmethod
   def test() -> str:
+    """Run tests"""
     return 'test'
-
-
-server = Spackle()    
-
-def tool(fn):
-  server.tool(fn)
-
-def run():
-  server.mcp.run()
-
-def call(tool: str):
-  return server.tools[tool]()
-
-def find_msbuild():
+    
+  @property
+  def probe(self):
+    if 'probe' not in self.mcps:
+      self.mcps['probe'] = ProbeServer()
+    return self.mcps['probe']
   
-    export SP_VSWHERE=$(wslpath -a -u "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe")
-  export SP_MSBUILD_DIR_WINDOWS=$("$SP_VSWHERE" -find "msbuild" | tr -d '\r')
-  export SP_MSBUILD_DIR_WSL="$(wslpath -a -u "$SP_MSBUILD_DIR_WINDOWS")"
-  export SP_MSBUILD="$SP_MSBUILD_DIR_WSL/Current/Bin/MSBuild.exe"; 
+  @property
+  def sqlite(self):
+    if 'sqlite' not in self.mcps:
+      self.mcps['sqlite'] = SQLiteServer()
+    return self.mcps['sqlite']
+
+
+spackle = Spackle()
+
+import sys
+sys.modules[__name__] = spackle
+
+def main():
+  spackle.serve()
+
+if __name__ == "__main__":
+  main()
