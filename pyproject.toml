@@ -11,3 +11,6 @@ dependencies = [
 
 [tool.setuptools]
 packages = ["spackle"]
+
+[project.scripts]
+spackle = "spackle:main"

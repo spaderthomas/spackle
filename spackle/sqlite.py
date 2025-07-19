@@ -188,8 +188,8 @@ class SqliteServer:
 
 
 def main():
-  server = SqlitServer()
-  server.run()
+  server = SqliteServer()
+  server.serve()
 
 if __name__ == "__main__":
   main()
