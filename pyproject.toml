@@ -1,0 +1,13 @@
+[project]
+name = "spackle"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.10.5",
+    "pydantic>=2.11.7",
+]
+
+[tool.setuptools]
+packages = ["spackle"]
