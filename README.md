@@ -3,6 +3,7 @@ Coding agents are quite good, but if you expect to hop into a session with no co
 
 More, there are a lot of excellent MCPs which make them more powerful in nearly any project, but setting them up for every new project is tedious.
 
+# What does it actually do?
 Hence, `spackle`. It's a simple project which:
 - Vendors or implements MCP servers, and exposes them through a CLI (`uv run spackle serve some_mcp`) as well as `.mcp.json`
 - Adds consistent instructions to every project (e.g. `You're not done until all the tests pass` or `Use the Spackle MCP to build the project`)
