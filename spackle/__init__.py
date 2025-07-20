@@ -9,6 +9,9 @@ import sqlite3
 import subprocess
 import sys
 
+import colorama
+from colorama import Fore, Style
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
@@ -33,18 +36,17 @@ class Paths:
     self.file    = os.path.dirname(os.path.abspath(__file__))
     self.project = os.path.realpath(os.path.join(self.file, '..'))
     self.source    = os.path.join(self.project, 'spackle')
-    self.sqlite      = os.path.join(self.source, 'sqlite.py')
-    self.probe       = os.path.join(self.source, 'probe.py')
-    self.agent     = os.path.join(self.project, 'agent')
-    self.profiles    = os.path.join(self.agent, 'profiles')
-    self.template    = os.path.join(self.agent, 'spackle')
+    self.asset     = os.path.join(self.project, 'asset')
+    self.agent       = os.path.join(self.asset, 'agent')
+    self.profiles      = os.path.join(self.agent, 'profiles')
+    self.template      = os.path.join(self.agent, 'spackle')
 
 
 class InitPaths():
   def __init__(self):
     self.root: str = os.getcwd()
     self.claude_md: str = os.path.join(self.root, 'CLAUDE.md')
-    self.mcp_json: str = os.path.join(self.root, '.mcp.json')
+    self.mcp_config: str = os.path.join(self.root, '.mcp.json')
     self.claude: str = os.path.join(self.root, '.claude')
     self.settings: str = os.path.join(self.claude, 'settings.local.json')
     
@@ -58,7 +60,16 @@ class Server:
     self.mcp.run()
 
 class Spackle:
+  @dataclass
+  class Colors:
+    item = Fore.LIGHTBLUE_EX
+    argument = Fore.LIGHTYELLOW_EX
+    arrow = Fore.LIGHTGREEN_EX
+
   def __init__(self):
+    colorama.init()
+    self.colors = Spackle.Colors()
+
     self.paths = Paths()
 
     self.mcp_registry = {
@@ -101,30 +112,58 @@ class Spackle:
     self.mcp_registry[cls.__name__] = cls
   
   # Commands
-  def init(self):
+  def init(self, force=False):
     init = InitPaths()
     os.makedirs(init.claude, exist_ok=True)
-    self._copy_tree(self.paths.template,                                  init.spackle)
-    self._copy_file(os.path.join(self.paths.profiles, 'everything.json'), init.settings)
-    self._copy_file(os.path.join(self.paths.agent, 'CLAUDE.md'),          init.claude_md)
-    self._copy_file(os.path.join(self.paths.agent, 'CLAUDE.md'),          init.claude_md)
+    self._copy_tree(self.paths.template, init.spackle, force=force)
+    self._copy_file(os.path.join(self.paths.profiles, 'default.json'), init.settings, force=force)
+    self._copy_file(os.path.join(self.paths.agent, 'CLAUDE.md'), init.claude_md, force=force)
+    self._copy_file(os.path.join(self.paths.agent, '.mcp.json'), init.mcp_config, force=force)
   
   def serve(self):
     spackle._build_mcp(name).serve()
 
   # Utilities
-  def _copy_tree(self, source, dest):
-    print(f'Copying {source} -> {dest}')
-    shutil.copytree(source, dest)
+  def _log_copy_action(self, source, dest, force):
+    print(f'{self._color(source, self.colors.item)} {self._color("->", self.colors.arrow)} {self._color(dest, self.colors.item)}')
 
-  def _copy_file(self, source, dest):
-    print(f'Copying {source} -> {dest}')
+    if os.path.exists(dest):
+      if force:
+        print(f'Directory exists and {self._color("--force", self.colors.argument)} was specified; removing')
+      else:
+        print(f'Directory exists, but {self._color("--force", self.colors.argument)} was not specified; skipping')
+
+  def _copy_tree(self, source, dest, force=False):
+    self._log_copy_action(source, dest, force)
+
+    if os.path.exists(dest):
+      if force:
+        shutil.rmtree(dest)
+      else:
+        return
+
+    shutil.copytree(source, dest)
+    print('OK!')
+
+  def _copy_file(self, source, dest, force=False):
+    self._log_copy_action(source, dest, force)
+
+    if os.path.exists(dest):
+      if force:
+        os.remove(dest)
+      else:
+        return
+
     shutil.copy2(source, dest)
+    print('OK!')
 
   def _build_mcp(self, name: str):
     if name not in self.mcps:
       self.mcps[name] = self.mcp_registry[name]()
     return self.mcps[name]
+  
+  def _color(self, text: str, color) -> str:
+    return f"{color}{text}{Style.RESET_ALL}"
 
 spackle = Spackle()
 
@@ -146,9 +185,11 @@ def test() -> str:
   return 'test'
 
 
-@spackle.command
-def init():
-  spackle.init()
+@spackle.command(args=[
+  ('--force', 'store_true', 'Overwrite existing files with a clean copy from spackle')
+])
+def init(force=False):
+  spackle.init(force=force)
 
 @spackle.command(args=[
   ('tool', str, 'Name of the tool to call')
@@ -175,8 +216,15 @@ def main():
   for cmd_name, cmd_info in spackle.commands.items():
     cmd_fn = cmd_info['func']
     subparser = subparsers.add_parser(cmd_name, help=cmd_fn.__doc__)
-    for arg_name, arg_type, arg_help in cmd_info.get('args', []):
-      subparser.add_argument(arg_name, type=arg_type, help=arg_help)
+    for arg_spec in cmd_info.get('args', []):
+      if len(arg_spec) == 3:
+        arg_name, arg_type, arg_help = arg_spec
+        if arg_type == 'store_true':
+          subparser.add_argument(arg_name, action='store_true', help=arg_help)
+        else:
+          subparser.add_argument(arg_name, type=arg_type, help=arg_help)
+      else:
+        subparser.add_argument(*arg_spec)
   
   args = parser.parse_args()
 

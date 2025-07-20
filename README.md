@@ -1,3 +1,14 @@
+<p align="center">
+    <img src="asset/github/boon_bane.png" alt="Always check the alt text!" width="210">
+</p>
+
+<p align="center">
+  <i>made by the good folks at boon/bane games</i>
+</p>
+
+# Shill
+[Deep Copy](https://store.steampowered.com/app/2639990/Deep_Copy/) is a top down point-and-click literary adventure set in a hand-painted science fiction world. [Click here to wishlist or play the free demo on Steam!](https://store.steampowered.com/app/2639990/Deep_Copy/)
+
 # Overview
 Coding agents are quite good, but if you expect to hop into a session with no configuration or tooling and start ripping out good code, you'll be disappointed. The agents are like us; they need to be able to easily build their code and run its tests to form a feedback loop. Unfortunately, providing scripts to do this is often brittle from the agent's perspective (e.g. needing to be run from a certain directory, needing to source a file containing build commands, etc).
 

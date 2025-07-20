@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "sqlite_explorer": { "command": "./.claude/mcp/sqlite/run.sh" },
-    "probe":           { "command": "./.claude/mcp/probe/run.sh"  },
-    "spry":            { "command": "./.claude/mcp/spry/run.sh"  }
-  }
-}
