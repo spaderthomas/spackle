@@ -1,13 +1,13 @@
 <p align="center">
-    <img src="asset/github/boon_bane.png" alt="Always check the alt text!" width="210">
+    <img src="asset/github/boon_bane.png" alt="i have no mouse and i must hover the alt text" width="210">
 </p>
 
 <p align="center">
-  <i>made by the good folks at boon/bane games</i>
+  <i>spackle (noun): a compound used to fill cracks and produce a smooth surface.</i>
 </p>
 
 # Shill
-[Deep Copy](https://store.steampowered.com/app/2639990/Deep_Copy/) is a top down point-and-click literary adventure set in a hand-painted science fiction world. [Click here to wishlist or play the free demo on Steam!](https://store.steampowered.com/app/2639990/Deep_Copy/)
+[Deep Copy](https://store.steampowered.com/app/2639990/Deep_Copy/) is a top down point-and-click literary adventure set in a hand-painted science fiction world made by we the fine folks at boon/bane. [Click here to wishlist or play the free demo on Steam!](https://store.steampowered.com/app/2639990/Deep_Copy/) 
 
 # Motivation
 *[quit yapping and take me to the examples](#Installation)*
