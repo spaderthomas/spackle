@@ -86,7 +86,8 @@
       "mcp__spry__find_logs_around_timestamp",
       "mcp__spry__search_forward",
       "mcp__probe__extract_code",
-      "Bash(./spry.exe --test --success --duration)"
+      "Bash(./spry.exe --test --success --duration)",
+      "Bash(uv run:*)"
     ]
   },
   "enableAllProjectMcpServers": true

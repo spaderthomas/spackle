@@ -1,5 +1,5 @@
-{
-  "permissions": {
+profiles = {
+  'permissive': {
     "allow": [
       "Bash(*)",
       "Bash(*:*)",
@@ -12,7 +12,6 @@
       "Bash(echo:*)",
       "Bash(find:*)",
       "Bash(free:*)",
-      "Bash(grep:*)",
       "Bash(head:*)",
       "Bash(htop:*)",
       "Bash(id:*)",
@@ -22,7 +21,6 @@
       "Bash(ps:*)",
       "Bash(pwd:*)",
       "Bash(rg:*)",
-      "Bash(rm:*)",
       "Bash(sed:*)",
       "Bash(sort:*)",
       "Bash(tail:*)",
@@ -40,37 +38,16 @@
       "Edit",
       "Create",
       "Write",
-      "Delete",
       "Grep",
       "Glob",
       "LS",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:docs.*)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:stackoverflow.com)",
-      "mcp__sqlite_explorer__describe_table",
-      "mcp__sqlite_explorer__list_tables",
-      "mcp__sqlite_explorer__read_query",
-      "mcp__probe__*",
-      "mcp__probe__search_code",
-      "mcp__probe__extract_code"
+      "WebFetch(domain:stackoverflow.com)"
     ],
     "deny": [
-      
+      "Bash(grep:*)"      
     ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit|MultiEdit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run ./.claude/spackle/hooks/ensure-spackle-templates-read-only.py"
-          }
-        ]
-      }
-    ]
-  },
-  "enableAllProjectMcpServers": true
+  }
 }
