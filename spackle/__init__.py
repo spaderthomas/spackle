@@ -30,16 +30,16 @@ from .profiles import profiles
 #########
 class Paths:
   def __init__(self):
-    self.file    = os.path.dirname(os.path.abspath(__file__))
-    self.project = os.path.realpath(os.path.join(self.file, '..'))
-    self.source    = os.path.join(self.project, 'spackle')
-    self.asset     = os.path.join(self.project, 'asset')
-    self.claude      = os.path.join(self.asset, 'claude')
-    self.claude_md     = os.path.join(self.claude, 'CLAUDE.md')
-    self.mcp_config    = os.path.join(self.claude, '.mcp.json')
-    self.prompts      = os.path.join(self.asset, 'prompts')
-    self.tasks        = os.path.join(self.asset, 'tasks')
-    self.templates    = os.path.join(self.asset, 'templates')
+    self.file        = os.path.dirname(os.path.abspath(__file__))
+    self.project     = os.path.realpath(os.path.join(self.file, '..'))
+    self.source        = os.path.join(self.project, 'spackle')
+    self.asset         = os.path.join(self.project, 'asset')
+    self.claude          = os.path.join(self.asset, 'claude')
+    self.claude_md         = os.path.join(self.claude, 'CLAUDE.md')
+    self.mcp_config        = os.path.join(self.claude, '.mcp.json')
+    self.prompts          = os.path.join(self.asset, 'prompts')
+    self.tasks            = os.path.join(self.asset, 'tasks')
+    self.templates        = os.path.join(self.asset, 'templates')
 
 
 class ProjectPaths:
@@ -52,6 +52,7 @@ class ProjectPaths:
     self.spackle: str    = os.path.join(self.root, '.spackle')
     self.tasks: str        = os.path.join(self.spackle, 'tasks')
     self.templates: str    = os.path.join(self.spackle, 'templates')
+    self.prompts: str      = os.path.join(self.spackle, 'prompts')
     self.config: str       = os.path.join(self.spackle, 'settings.json')
 
 
@@ -233,21 +234,40 @@ class Spackle:
     }    
 
     # Set up the filesystem
+    if not os.path.exists(project.spackle):
+      if os.path.exists(project.claude_md):
+        print(f"You are initializing a new project, but already have CLAUDE.md. That's OK, but make sure to add a reference to @.spackle/prompts/*.md in CLAUDE.md")
+
     os.makedirs(project.claude, exist_ok=True)
     os.makedirs(project.spackle, exist_ok=True)
-    self._copy_tree(self.paths.templates, project.templates, force=force)
-    self._copy_file(self.paths.claude_md, project.claude_md, force=force)
-    self._copy_file(self.paths.mcp_config, project.mcp_config, force=force)
+    os.makedirs(project.prompts, exist_ok=True)
 
-    # Don't stomp on existing tasks if we're just trying to reinitialize after, say, adding a hook
-    if not os.path.exists(project.tasks):
-      self._copy_tree(self.paths.tasks, project.tasks, force=force)
+    # Never overwrite the stuff that Claude uses at runtime
+    self._copy_dir_file(self.paths.prompts, project.prompts, 'user.md')
+    self._copy_dir_file(self.paths.prompts, project.prompts, 'claude.md')
+    self._copy_tree(self.paths.tasks, project.tasks)
 
-    with open(project.settings, 'w') as file:
-      json.dump(settings, file, indent=2)
+    # Always overwrite our internal read only stuff
+    self._copy_dir_file(self.paths.prompts, project.prompts, 'spackle.md', force=True, log=True)
+    self._copy_tree(self.paths.templates, project.templates, force=True)
 
     with open(project.config, 'w') as file:
       json.dump(config, file, indent=2)
+
+    # Overwrite configuration files if we're asked to
+    self._copy_file(self.paths.mcp_config, project.mcp_config, force=force, log=True)
+    self._copy_file(self.paths.claude_md, project.claude_md, force=force, log=True)
+
+    overwrite_settings = True
+    if os.path.exists(project.settings):
+      overwrite_settings = force
+
+    if overwrite_settings:
+      with open(project.settings, 'w') as file:
+        json.dump(settings, file, indent=2)
+        print(f'{self._color(project.settings, self.colors.item)} ({self._color("--force", self.colors.shell)} specified; overwriting)')
+    else:
+      print(f'{self._color(project.settings, self.colors.item)} ({self._color("--force", self.colors.shell)} not specified; skipping)')
 
   
   def serve(self, name: str):
@@ -309,8 +329,9 @@ class Spackle:
 
     print(message)
 
-  def _copy_tree(self, source, dest, force=False):
-    self._log_copy_action(source, dest, force)
+  def _copy_tree(self, source, dest, force=False, log=False):
+    if log:
+      self._log_copy_action(source, dest, force)
 
     if os.path.exists(dest):
       if force:
@@ -320,8 +341,9 @@ class Spackle:
 
     shutil.copytree(source, dest)
 
-  def _copy_file(self, source, dest, force=False):
-    self._log_copy_action(source, dest, force)
+  def _copy_file(self, source, dest, force=False, log=False):
+    if log:
+      self._log_copy_action(source, dest, force)
 
     if os.path.exists(dest):
       if force:
@@ -330,6 +352,9 @@ class Spackle:
         return
 
     shutil.copy2(source, dest)
+
+  def _copy_dir_file(self, source, dest, file_name, force=False, log=False):
+    self._copy_file(os.path.join(source, file_name), os.path.join(dest, file_name), force, log)
 
   def _build_mcp(self, name: str):
     if name not in self.mcps:
