@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 import subprocess
+
+import spackle
+
 from fastmcp import FastMCP
 
-
+@spackle.mcp(name = 'probe')
 class ProbeServer:
   def __init__(self):
     self.mcp = FastMCP("spackle-probe")

@@ -2,6 +2,7 @@
 
 import argparse
 import enum
+import importlib
 import json
 import os
 import platform
@@ -15,14 +16,14 @@ import colorama
 import pydantic
 import fastmcp
 
+from abc import abstractmethod
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, Optional, List, Callable, Dict
 
 from .profiles import profiles
-from .probe import ProbeServer
-from .sqlite import SqliteServer
+
 
 #########
 # PATHS #
@@ -41,50 +42,61 @@ class Paths:
     self.templates    = os.path.join(self.asset, 'templates')
 
 
-class ProjectPaths():
+class ProjectPaths:
   def __init__(self):
     self.root: str = os.getcwd()
     self.claude_md: str  = os.path.join(self.root, 'CLAUDE.md')
     self.mcp_config: str = os.path.join(self.root, '.mcp.json')
     self.claude: str     = os.path.join(self.root, '.claude')
     self.settings: str     = os.path.join(self.claude, 'settings.local.json')
-    self.spackle: str      = os.path.join(self.claude, 'spackle')
-    self.tasks: str          = os.path.join(self.spackle, 'tasks')
-    self.templates: str      = os.path.join(self.spackle, 'templates')
-    
-    self.spackle: str = os.path.join(self.claude, 'spackle')
+    self.spackle: str    = os.path.join(self.root, '.spackle')
+    self.tasks: str        = os.path.join(self.spackle, 'tasks')
+    self.templates: str    = os.path.join(self.spackle, 'templates')
+    self.config: str       = os.path.join(self.spackle, 'settings.json')
 
-####################
-# SPACKLE-MAIN MCP #
-####################
+
+#######
+# MCP #
+#######
 class Server:
-  def __init__(self):
-    self.mcp = fastmcp.FastMCP('spackle-main', on_duplicate_tools='replace')
-  
+  @abstractmethod
   def serve(self):
-    self.mcp.run()
+    pass
+
 
 #########
 # HOOKS #
 #########
-class ClaudeKey(enum.Enum):
-  Tool = 'tool_name'
-
-class ClaudeTool(enum.Enum):
+class HookTool(enum.Enum):
+  Task = 'Task'
+  Bash = 'Bash'
+  Glob = 'Glob'
+  Grep = 'Grep'
+  Read = 'Read'
   Edit = 'Edit'
   MultiEdit = 'MultiEdit'
   Write = 'Write'
+  WebFetch = 'WebFetch'
+  WebSearch = 'WebSearch'
 
-class ClaudeHook(enum.Enum):
+class HookEvent(enum.Enum):
   PreToolUse = 'PreToolUse'
+  PostToolUse = 'PostToolUse'
+  Notification = 'Notification'
+  UserPromptSubmit = 'UserPromptSubmit'
+  Stop = 'Stop'
+  SubagentStop = 'SubagentStop'
+  PreCompact = 'PreCompact'
+
+  def match(self, value: str):
+    return self.value == value
 
 @dataclass
 class Hook:
   name: str
-  kind: ClaudeHook
-  tools: List[ClaudeTool]
+  event: HookEvent
+  tools: Optional[List[HookTool]]
   fn: Callable
-
 
 class HookContext():
   def __init__(self, hook: Hook, request_str: str):
@@ -96,42 +108,36 @@ class HookContext():
     except json.JSONDecodeError as e:
       self.deny(f'Failed to decode JSON request for hook: {self.request_str}')
 
+    if not hook.event.match(self.request['hook_event_name']):
+      self.deny(f'The hook {hook.name} was invoked for {self.request["hook_event_name"]}, but is registered for {hook.event.value}. This is an error.')
+
   def run(self):
     self.hook.fn(self)
 
-  def allow(self):
+  def allow(self, message: Optional[str] = None):
+    if message:
+      print(message, file=sys.stderr)
+      sys.exit(1)
+
     sys.exit(0)
 
   def deny(self, message: Optional[str] = None):
     if message:
       print(message, file=sys.stderr)
-      sys.exit(2)
-    else:
-      sys.exit(1)
 
-  def contains(self, key: ClaudeKey)-> bool:
-    return key.value in self.request
+    sys.exit(2)
 
-  def get(self, key: ClaudeKey):
-    if key.value not in self.request:
-      return None
 
-    return self.request[key.value]
-
-  def match(self, tools: List[ClaudeTool]) -> bool:
-    requested_tool = self.get(ClaudeKey.Tool)
-    for tool in tools:
-      if tool == requested_tool:
-        return True
-
-    return False
-
+###########
+# SPACKLE #
+###########
 class Spackle:
   @dataclass
   class Colors:
     item =  colorama.Fore.LIGHTBLUE_EX
     shell = colorama.Fore.LIGHTYELLOW_EX
     arrow = colorama.Fore.LIGHTGREEN_EX
+    error = colorama.Fore.LIGHTRED_EX
 
   def __init__(self):
     colorama.init()
@@ -140,17 +146,11 @@ class Spackle:
     self.paths = Paths()
 
     self.mcp_registry = {
-      'main': Server,
-      'probe': ProbeServer,
-      'sqlite': SqliteServer,
     }
+
     self.mcps = {}
-    self._build_mcp('main')
-
     self.tools = {}
-    
     self.commands = {}
-
     self.hooks = {}
 
   ##############
@@ -173,16 +173,27 @@ class Spackle:
       
     return decorator
 
-  def mcp(self, cls):
-    self.mcp_registry[cls.__name__] = cls
-    return cls
+  def mcp(self, name: str):
+    def decorator(cls):
+      mcp_name = name or cls.__name__
+      if mcp_name in self.mcp_registry:
+        raise Exception(f'{mcp_name} is already registered with spackle')
 
-  def hook(self, kind: ClaudeHook, tools: List[ClaudeTool]):
+      self.mcp_registry[mcp_name] = cls
+
+      if len(self.mcp_registry) == 1:
+        self._build_mcp(mcp_name)
+
+      return cls
+
+    return decorator
+
+  def hook(self, event: HookEvent, tools: Optional[List[HookTool]] = None):
     def decorator(fn):
       hook = Hook(
         name = fn.__name__,
-        kind = kind,
-        tools = tools,
+        event = event,
+        tools = tools or [],
         fn = fn
       )
       self.hooks[hook.name] = hook
@@ -192,16 +203,23 @@ class Spackle:
   ############
   # COMMANDS #
   ############
-  def init(self, force=False):
+  def build(self, force: bool = False, file: str = None):
     project = ProjectPaths()
-    os.makedirs(project.claude, exist_ok=True)
-    os.makedirs(project.spackle, exist_ok=True)
-    self._copy_tree(self.paths.templates, project.templates, force=force)
-    self._copy_tree(self.paths.tasks, project.tasks, force=force)
-    self._copy_file(self.paths.claude_md, project.claude_md, force=force)
-    self._copy_file(self.paths.mcp_config, project.mcp_config, force=force)
 
+    # Build the Spackle config file first, so the user file is loaded if present
+    config = {
+      'file_path': ''
+    }
 
+    if file:
+      file_path = os.path.join(project.root, file)
+      config['file_path'] = file_path
+      module_name = 'spackle_user'
+
+      if not self._load_user_file_from_path(file_path):
+        print(f'{self._color(file_path, self.colors.error)} does not exist; exiting')
+
+    # Build the Claude config file
     settings = {
       'permissions': profiles['permissive'],
       'enabledMcpjsonServers': [
@@ -214,12 +232,40 @@ class Spackle:
       'hooks': self._build_hooks()
     }    
 
+    # Set up the filesystem
+    os.makedirs(project.claude, exist_ok=True)
+    os.makedirs(project.spackle, exist_ok=True)
+    self._copy_tree(self.paths.templates, project.templates, force=force)
+    self._copy_file(self.paths.claude_md, project.claude_md, force=force)
+    self._copy_file(self.paths.mcp_config, project.mcp_config, force=force)
+
+    # Don't stomp on existing tasks if we're just trying to reinitialize after, say, adding a hook
+    if not os.path.exists(project.tasks):
+      self._copy_tree(self.paths.tasks, project.tasks, force=force)
+
     with open(project.settings, 'w') as file:
       json.dump(settings, file, indent=2)
 
+    with open(project.config, 'w') as file:
+      json.dump(config, file, indent=2)
+
   
-  def serve(self):
+  def serve(self, name: str):
+    self._load_user_file_from_config()
+
     spackle._build_mcp(name).serve()
+
+  def run_tool(self, name: str):
+    self._load_user_file_from_config()
+
+    self.tools[name]()
+
+  def run_hook(self, name: str, request: str):
+    self._load_user_file_from_config()
+
+    context = HookContext(spackle.hooks[name], request)
+    context.run()
+    context.deny('Tell the user that the hook exited without making a decision')
 
   #########
   # TOOLS #
@@ -302,27 +348,71 @@ class Spackle:
         'command': f'uv run spackle hook {hook.name}'
       })    
 
-      return hooks
+    return hooks
 
   def _ensure_hook(self, hooks, hook: Hook) -> Dict:
-    if hook.kind.value not in hooks:
-      hooks[hook.kind.value] = []
+    if hook.event.value not in hooks:
+      hooks[hook.event.value] = []
 
     matcher = "|".join(tool.value for tool in hook.tools)
 
-    for entry in hooks[hook.kind.value]:
+    for entry in hooks[hook.event.value]:
       if entry['matcher'] == matcher:
         return entry
 
-    hooks[hook.kind.value].append({
+    hooks[hook.event.value].append({
       'matcher': matcher,
       'hooks': []
     })
-    return hooks[hook.kind.value][-1]
+    return hooks[hook.event.value][-1]
 
+  def _load_user_file_from_path(self, file_path: str) -> bool:
+    module_name = 'spackle_user'
+
+    if not os.path.exists(file_path):
+      return False
+
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+
+    return True
+
+  def _load_user_file_from_config(self) -> bool:
+    project = ProjectPaths()
+
+    if not os.path.exists(project.config):
+      return False
+
+    with open(project.config, 'r') as file:
+      config = json.load(file)
+      return self._load_user_file_from_path(config['file_path'])
   
 spackle = Spackle()
 
+
+##############
+# DECORATORS #
+##############
+tool = spackle.tool
+hook = spackle.hook
+mcp = spackle.mcp
+
+
+#################
+# BUILT IN MCPS #
+#################
+@spackle.mcp(name = 'main')
+class DefaultServer(Server):
+  def __init__(self):
+    self.mcp = fastmcp.FastMCP('spackle-main', on_duplicate_tools='replace')
+  
+  def serve(self):
+    self.mcp.run()
+
+from .probe import ProbeServer
+from .sqlite import SqliteServer
 
 ##################
 # BUILT IN TOOLS #
@@ -352,32 +442,44 @@ def create_task(task_name: str) -> str:
 ##################
 # BUILT IN HOOKS #
 ##################
-@spackle.hook(kind=ClaudeHook.PreToolUse, tools=[ClaudeTool.Edit, ClaudeTool.MultiEdit, ClaudeTool.Write])
+@spackle.hook(event=HookEvent.PreToolUse, tools=[HookTool.Edit, HookTool.MultiEdit, HookTool.Write])
 def ensure_spackle_templates_are_read_only(context: HookContext):
-  context.deny("Not today, big guy")
+  project = ProjectPaths()
+  file_path = context.request['tool_input']['file_path']
+  is_within_spackle = os.path.commonpath([project.spackle, file_path]) == project.spackle
+  is_within_tasks = os.path.commonpath([project.tasks, file_path]) == project.tasks
+
+  if is_within_spackle and not is_within_tasks:
+    context.deny(f'You are not allowed to edit files in {project.spackle}, except for your {project.tasks}')
+
+  context.allow()
+
 
 #######
 # CLI #
 #######
+# spackle build
 @spackle.command(
+  name = 'build',
   args = [
-    ('--force', 'store_true', 'Overwrite existing files with a clean copy from spackle')
+    ('--force', 'store_true', 'Overwrite existing files with a clean copy from spackle'),
+    ('--file', str, 'Python file to copy to the project')
   ]
 )
-def init(force=False):
-  spackle.init(force=force)
+def run_build(force=False, file: str = None):
+  spackle.build(force=force, file=file)
 
-
+# spackle tool
 @spackle.command(
   name = 'tool',
   args = [
-    ('tool', str, 'Name of the tool to call')
+    ('name', str, 'Name of the tool to call')
   ]
 )
-def run_tool(tool: str):
-  return spackle.tools[tool]()
+def run_tool(name: str):
+  return spackle.run_tool(name)
 
-
+# spackle hook
 @spackle.command(
   name = 'hook',
   args = [
@@ -390,34 +492,26 @@ def run_hook(name: str):
     print(f"Since hooks are only useful insofar as they are called by Claude, you can't invoke a hook without passing the JSON request via stdin (e.g. {example_command})")
     return
 
-  context = HookContext(spackle.hooks[name], sys.stdin.read())
-  context.run()
-  context.deny('Tell the user that the hook exited without making a decision')
+  spackle.run_hook(name, sys.stdin.read())
 
+# spackle serve
 @spackle.command(
   args = [
     ('name', str, 'Name of the MCP server to run')
   ]
 )
 def serve(name: str = None):
-  spackle._build_mcp(name).serve()
+  spackle.serve(name)
 
-
+# spackle debug
 @spackle.command()
 def debug():
   create_task('asdf')
 
 
-##############
-# DECORATORS #
-##############
-def tool(fn):
-  spackle.tool(fn)
-
-def hook(fn):
-  spackle.hook(fn)
-
-
+########
+# MAIN #
+########
 def main():
   parser = argparse.ArgumentParser(description='Spackle - MCP server for build, test, and run tools')
   subparsers = parser.add_subparsers(dest='command', help='Available commands')

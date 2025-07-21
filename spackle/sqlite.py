@@ -1,10 +1,18 @@
+# Thanks to https://github.com/hannesrudolph/sqlite-explorer-fastmcp-mcp-server
+#
+# Vendored instead of submoduled because this is just a base for a more featureful SQLite server
+
+
 import os
+import sqlite3
 import sys
+
+import spackle
+
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
-import sqlite3
 from fastmcp import FastMCP
 
 @dataclass
@@ -31,17 +39,10 @@ class SqliteConnection:
     if self.conn:
       self.conn.close()
 
-
+@spackle.mcp(name = 'sqlite')
 class SqliteServer:
   def __init__(self, db_path: Optional[str] = None):
     self.mcp = FastMCP("spackle-sqlite")
-    
-    # Default database path
-    if db_path is None:
-      file_dir = os.path.dirname(os.path.abspath(__file__))
-      project_dir = os.path.realpath(os.path.join(file_dir, '..', '..', '..'))
-      asset_dir = os.path.join(project_dir, 'asset')
-      db_path = os.path.join(asset_dir, 'spry.db')
     
     self.db_path = Path(db_path)
     
