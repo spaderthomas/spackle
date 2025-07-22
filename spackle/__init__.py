@@ -5,6 +5,7 @@ import enum
 import importlib
 import json
 import os
+import pathlib
 import platform
 import time
 import shutil
@@ -45,15 +46,18 @@ class Paths:
 class ProjectPaths:
   def __init__(self):
     self.root: str = os.getcwd()
-    self.claude_md: str  = os.path.join(self.root, 'CLAUDE.md')
-    self.mcp_config: str = os.path.join(self.root, '.mcp.json')
-    self.claude: str     = os.path.join(self.root, '.claude')
-    self.settings: str     = os.path.join(self.claude, 'settings.local.json')
-    self.spackle: str    = os.path.join(self.root, '.spackle')
-    self.tasks: str        = os.path.join(self.spackle, 'tasks')
-    self.templates: str    = os.path.join(self.spackle, 'templates')
-    self.prompts: str      = os.path.join(self.spackle, 'prompts')
-    self.config: str       = os.path.join(self.spackle, 'settings.json')
+    self.claude_md: str      = os.path.join(self.root, 'CLAUDE.md')
+    self.mcp_config: str     = os.path.join(self.root, '.mcp.json')
+    self.claude: str         = os.path.join(self.root, '.claude')
+    self.settings: str         = os.path.join(self.claude, 'settings.local.json')
+    self.spackle: str        = os.path.join(self.root, '.spackle')
+    self.tasks: str            = os.path.join(self.spackle, 'tasks')
+    self.templates: str        = os.path.join(self.spackle, 'templates')
+    self.prompts: str          = os.path.join(self.spackle, 'prompts')
+    self.user_prompt: str        = os.path.join(self.prompts, 'user.md')
+    self.claude_prompt: str      = os.path.join(self.prompts, 'claude.md')
+    self.spackle_prompt: str     = os.path.join(self.prompts, 'spackle.md')
+    self.config: str           = os.path.join(self.spackle, 'settings.json')
 
 
 #######
@@ -63,6 +67,12 @@ class Server:
   @abstractmethod
   def serve(self):
     pass
+
+class McpResult(pydantic.BaseModel):
+  return_code: int
+  response: str
+  stderr: str
+  stdout: str
 
 
 #########
@@ -219,6 +229,7 @@ class Spackle:
 
       if not self._load_user_file_from_path(file_path):
         print(f'{self._color(file_path, self.colors.error)} does not exist; exiting')
+        exit(1)
 
     # Build the Claude config file
     settings = {
@@ -234,9 +245,16 @@ class Spackle:
     }    
 
     # Set up the filesystem
-    if not os.path.exists(project.spackle):
-      if os.path.exists(project.claude_md):
-        print(f"You are initializing a new project, but already have CLAUDE.md. That's OK, but make sure to add a reference to @.spackle/prompts/*.md in CLAUDE.md")
+    is_new_project = not os.path.exists(project.spackle)
+    is_existing_claude_config = os.path.exists(project.claude_md) or os.path.exists(project.settings)
+    if is_new_project and is_existing_claude_config and not force:
+        print(f"You are initializing a new project, but already have Claude configurations. spackle needs to own (i.e. have overwrite access):")
+        print(f'  - {self._color(project.mcp_config, self.colors.item)}')
+        print(f'  - {self._color(project.settings, self.colors.item)}')
+
+        rerun = ['spackle'] + sys.argv[1:]
+        print(f'Rerun with {self._color(" ".join(rerun), self.colors.item)} {self._color("--force", self.colors.shell)}')
+        exit()
 
     os.makedirs(project.claude, exist_ok=True)
     os.makedirs(project.spackle, exist_ok=True)
@@ -248,7 +266,7 @@ class Spackle:
     self._copy_tree(self.paths.tasks, project.tasks)
 
     # Always overwrite our internal read only stuff
-    self._copy_dir_file(self.paths.prompts, project.prompts, 'spackle.md', force=True, log=True)
+    self._copy_dir_file(self.paths.prompts, project.prompts, 'spackle.md', force=True)
     self._copy_tree(self.paths.templates, project.templates, force=True)
 
     with open(project.config, 'w') as file:
@@ -262,30 +280,31 @@ class Spackle:
     if os.path.exists(project.settings):
       overwrite_settings = force
 
+    self._log_copy_action('generated file', project.settings, overwrite_settings)
     if overwrite_settings:
       with open(project.settings, 'w') as file:
         json.dump(settings, file, indent=2)
-        print(f'{self._color(project.settings, self.colors.item)} ({self._color("--force", self.colors.shell)} specified; overwriting)')
-    else:
-      print(f'{self._color(project.settings, self.colors.item)} ({self._color("--force", self.colors.shell)} not specified; skipping)')
-
   
-  def serve(self, name: str):
+  def run_server(self, name: str):
     self._load_user_file_from_config()
 
-    spackle._build_mcp(name).serve()
+    self._build_mcp(name).serve()
 
   def run_tool(self, name: str):
     self._load_user_file_from_config()
 
-    self.tools[name]()
+    return self.tools[name]()
 
   def run_hook(self, name: str, request: str):
     self._load_user_file_from_config()
 
-    context = HookContext(spackle.hooks[name], request)
+    context = HookContext(self.hooks[name], request)
     context.run()
     context.deny('Tell the user that the hook exited without making a decision')
+
+  def wrap_subprocess(self, *args, **kwargs):
+    kwargs['stdin'] = subprocess.DEVNULL
+    return subprocess.run(*args, **kwargs)
 
   #########
   # TOOLS #
@@ -319,13 +338,14 @@ class Spackle:
   # UTILITIES #
   #############
   def _log_copy_action(self, source, dest, force):
-    message = f'{self._color(source, self.colors.item)} {self._color("->", self.colors.arrow)} {self._color(dest, self.colors.item)}'
-
+    message = ''
     if os.path.exists(dest):
       if force:
         message = f'{message} ({self._color("--force", self.colors.shell)} specified; overwriting)'
       else:
         message = f'{message} ({self._color("--force", self.colors.shell)} not specified; skipping)'
+
+    message = f'{message} {self._color(source, self.colors.item)} {self._color("->", self.colors.arrow)} {self._color(dest, self.colors.item)}'
 
     print(message)
 
@@ -397,10 +417,14 @@ class Spackle:
     if not os.path.exists(file_path):
       return False
 
-    spec = importlib.util.spec_from_file_location(module_name, file_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    try:
+      spec = importlib.util.spec_from_file_location(module_name, file_path)
+      module = importlib.util.module_from_spec(spec)
+      sys.modules[module_name] = module
+      spec.loader.exec_module(module)
+    except Exception as e:
+      print(e, file=sys.stderr)
+      exit(1)
 
     return True
 
@@ -413,16 +437,36 @@ class Spackle:
     with open(project.config, 'r') as file:
       config = json.load(file)
       return self._load_user_file_from_path(config['file_path'])
-  
+
+  def _canonicalize_path(self, path: str) -> str:
+    return pathlib.Path(path).resolve()
+
+  def _is_file_path_within(self, file_path: str, directory: str) -> bool:
+    return os.path.commonpath([directory, file_path]) == directory
+
+  def _is_file_path_equal(self, a: str, b: str) -> bool:
+    return self._canonicalize_path(a) == self._canonicalize_path(b)
+
 spackle = Spackle()
 
 
-##############
-# DECORATORS #
-##############
+###########
+# EXPORTS #
+###########
+def windows_to_wsl(windows_path: str) -> str:
+  command = ['wslpath', "-a", "-u", windows_path]
+  result = spackle.wrap_subprocess(command, capture_output=True, text=True)
+  return result.stdout.strip()    
+
+def wsl_to_windows(wsl_path: str) -> str:
+  command = ['wslpath', "-a", "-w", wsl_path]
+  result = spackle.wrap_subprocess(command, capture_output=True, text=True)
+  return result.stdout.strip()
+
 tool = spackle.tool
 hook = spackle.hook
 mcp = spackle.mcp
+wrap_subprocess = spackle.wrap_subprocess
 
 
 #################
@@ -443,19 +487,29 @@ from .sqlite import SqliteServer
 # BUILT IN TOOLS #
 ##################
 @spackle.tool
-def build() -> str:
+def build() -> McpResult:
   """Build the project"""
-  return 'The build command has not been implemented in this project. Do not try to build the project through other means; instead, ask what to do.'
+  return McpResult(
+    return_code = 0,
+    response = 'The build command has not been implemented in this project. It is imperative that you do not try to build the project through other means; instead, ask what to do.',
+    stderr = '',
+    stdout = '',
+  )
 
 @spackle.tool
 def run() -> str:
   """Run the project"""
-  return 'The run command has not been implemented in this project. Do not try to run the project through other means; instead, ask what to do.'
+  return 'The run command has not been implemented in this project. It is imperative that you do not try to run the project through other means; instead, ask what to do.',
 
 @spackle.tool
-def test() -> str:
+def test() -> McpResult:
   """Run tests"""
-  return 'The test command has not been implemented in this project. Do not try to run the tests through other means; instead, ask what to do.'
+  return McpResult(
+    return_code = 0,
+    response = 'The test command has not been implemented in this project. Ask the user what to do.',
+    stderr = '',
+    stdout = '',
+  )
 
 @spackle.tool
 def create_task(task_name: str) -> str:
@@ -471,11 +525,21 @@ def create_task(task_name: str) -> str:
 def ensure_spackle_templates_are_read_only(context: HookContext):
   project = ProjectPaths()
   file_path = context.request['tool_input']['file_path']
-  is_within_spackle = os.path.commonpath([project.spackle, file_path]) == project.spackle
-  is_within_tasks = os.path.commonpath([project.tasks, file_path]) == project.tasks
+  file_path = spackle._canonicalize_path(file_path)
 
-  if is_within_spackle and not is_within_tasks:
-    context.deny(f'You are not allowed to edit files in {project.spackle}, except for your {project.tasks}')
+  message = f'You are not allowed to edit that file in {project.spackle}. Do not make a copy with your edits in a different location; ask me what you should do.'
+
+  if spackle._is_file_path_within(file_path, project.templates):
+    context.deny(message)
+
+  if spackle._is_file_path_equal(file_path, project.user_prompt):
+    context.deny(message)
+
+  if spackle._is_file_path_equal(file_path, project.spackle_prompt):
+    context.deny(message)
+
+  if spackle._is_file_path_equal(file_path, project.settings):
+    context.deny(message)
 
   context.allow()
 
@@ -521,12 +585,13 @@ def run_hook(name: str):
 
 # spackle serve
 @spackle.command(
+  name = 'serve',
   args = [
     ('name', str, 'Name of the MCP server to run')
   ]
 )
 def serve(name: str = None):
-  spackle.serve(name)
+  spackle.run_server(name)
 
 # spackle debug
 @spackle.command()

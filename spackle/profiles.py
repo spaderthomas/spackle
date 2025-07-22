@@ -44,7 +44,15 @@ profiles = {
       "WebFetch(domain:github.com)",
       "WebFetch(domain:docs.*)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:stackoverflow.com)"
+      "WebFetch(domain:stackoverflow.com)",
+      "mcp__spackle-probe__search_code",
+      "mcp__spackle-probe__query_code",
+      "mcp__spackle-probe__extract_code",
+      "mcp__spackle-main__build",
+      "mcp__spackle-main__run",
+      "mcp__spackle-main__test",
+      "mcp__spackle-main__create_task",
+
     ],
     "deny": [
       "Bash(grep:*)"      
