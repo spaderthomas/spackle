@@ -322,3 +322,79 @@ def test_spackle_config_includes_foo_provider(temp_project_dir):
     config = json.load(f)
     assert 'provider' in config, 'Config should contain provider field'
     assert config['provider'] == 'foo', 'Provider should be foo when specified'
+
+
+def test_spackle_build_creates_prompt_files(temp_project_dir):
+  """Test that spackle build copies prompt files from filesystem"""
+  
+  # Create test prompt files in the project root
+  prompt_content = "This is a custom prompt from a file."
+  another_content = "# Another Custom Prompt\n\nThis prompt is in markdown format."
+  
+  prompt_file = temp_project_dir / 'custom_prompt.md'
+  prompt_file.write_text(prompt_content)
+  
+  another_file = temp_project_dir / 'docs' / 'another.txt'
+  another_file.parent.mkdir(exist_ok=True)
+  another_file.write_text(another_content)
+  
+  # Create a test file with prompt_file decorators
+  test_code = f"""#!/usr/bin/env python
+
+import spackle
+
+@spackle.load
+def setup_prompt_files():
+    @spackle.prompt_file
+    def custom():
+        return 'custom_prompt.md'
+    
+    @spackle.prompt_file
+    def another():
+        return 'docs/another.txt'
+"""
+
+  test_file = temp_project_dir / 'test_prompt_files.py'
+  test_file.write_text(test_code)
+
+  # Run spackle build with the test file
+  success, stdout, stderr = run_command(f'spackle build --file {test_file.name}', cwd=temp_project_dir)
+  assert success, f'spackle build with prompt files failed: {stderr}'
+  
+  # Check that .claude/commands directory is created
+  commands_dir = temp_project_dir / '.claude' / 'commands'
+  assert commands_dir.exists(), '.claude/commands directory should be created'
+  
+  # Check that prompt files are copied
+  custom_file = commands_dir / 'custom.md'
+  assert custom_file.exists(), 'custom.md should be created in .claude/commands'
+  
+  another_file_copy = commands_dir / 'another.md'
+  assert another_file_copy.exists(), 'another.md should be created in .claude/commands'
+  
+  # Verify the content of the copied files
+  custom_content = custom_file.read_text()
+  assert custom_content == prompt_content
+  
+  another_content_copied = another_file_copy.read_text()
+  assert another_content_copied == another_content
+
+
+def test_prompt_file_decorator_without_build():
+  """Test that the prompt_file decorator stores file paths correctly"""
+  import spackle
+  
+  # Clear any existing prompt files
+  spackle.spackle.prompt_files.clear()
+  
+  @spackle.prompt_file
+  def test_file_command():
+    return 'test/path.md'
+  
+  # Verify the function was stored
+  assert 'test_file_command' in spackle.spackle.prompt_files
+  assert spackle.spackle.prompt_files['test_file_command'] == test_file_command
+  
+  # Verify calling the function returns the expected filename
+  result = spackle.spackle.prompt_files['test_file_command']()
+  assert result == 'test/path.md'

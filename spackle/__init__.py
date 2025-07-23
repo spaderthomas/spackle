@@ -185,27 +185,31 @@ class Spackle:
     self.tools = {}
     self.hooks = {}
     self.prompts = {}
+    self.prompt_files = {}
 
   ##############
   # DECORATORS #
   ##############
   def tool(self, fn: Callable) -> Callable:
     self.tools[fn.__name__] = fn
+
+    # Ensure main MCP is initialized
+    if 'main' not in self.mcps:
+      self._build_mcp('main')
+      
+    # Register tool with the main MCP
     self.mcps['main'].mcp.tool(fn)
     return fn
 
   def mcp(self, name: str) -> Callable:
-    def decorator(cls):
-      mcp_name = name or cls.__name__
+    def decorator(func):
+      mcp_name = name or func.__name__
       if mcp_name in self.mcp_registry:
         raise Exception(f'{mcp_name} is already registered with spackle')
 
-      self.mcp_registry[mcp_name] = cls
+      self.mcp_registry[mcp_name] = func
 
-      if len(self.mcp_registry) == 1:
-        self._build_mcp(mcp_name)
-
-      return cls
+      return func
 
     return decorator
 
@@ -223,6 +227,10 @@ class Spackle:
 
   def prompt(self, fn: Callable) -> Callable:
     self.prompts[fn.__name__] = fn
+    return fn
+
+  def prompt_file(self, fn: Callable) -> Callable:
+    self.prompt_files[fn.__name__] = fn
     return fn
 
   ############
@@ -300,15 +308,25 @@ class Spackle:
     os.makedirs(install.prompts, exist_ok=True)
 
     # Never overwrite the stuff that Claude uses at runtime
-    self._copy_dir_file(self.paths.prompts, install.prompts, 'user.md')
-    self._copy_dir_file(self.paths.prompts, install.prompts, 'claude.md')
+    self._copy_file(
+      os.path.join(self.paths.prompts, 'spackle-user.md'), 
+      os.path.join(install.prompts, 'user.md')
+    )
+    self._copy_file(
+      os.path.join(self.paths.prompts, 'spackle-task.md'), 
+      os.path.join(install.prompts, 'claude.md')
+    )
     self._copy_tree(self.paths.tasks, install.tasks)
 
     # Always overwrite our internal read only stuff
-    self._copy_dir_file(self.paths.prompts, install.prompts, 'spackle.md', force=True)
+    self._copy_file(
+      os.path.join(self.paths.prompts, 'spackle-main.md'), 
+      os.path.join(install.prompts, 'spackle.md'), 
+      force=True, log=True
+    )
     self._copy_tree(self.paths.templates, install.templates, force=True)
 
-    # Generate slash command files
+    # Generate slash command files from functions
     for name, fn in self.prompts.items():
       try:
         content = fn()        
@@ -318,6 +336,31 @@ class Spackle:
           
       except Exception as e:
         print(f'Error generating prompt file for {name}: {e}')
+
+    # Copy prompt files from filesystem
+    for name, fn in self.prompt_files.items():
+      try:
+        filename = fn()
+        if not isinstance(filename, str):
+          print(f'Warning: Prompt file function {name} returned non-string value: {type(filename)}')
+          continue
+          
+        # Handle absolute paths (for built-in prompts) vs relative paths (for user prompts)
+        if os.path.isabs(filename):
+          source_file = filename
+        else:
+          source_file = os.path.join(install.root, filename)
+        if not os.path.exists(source_file):
+          print(f'Warning: Prompt file {source_file} not found, skipping {name}')
+          continue
+          
+        # Always use .md extension in commands directory
+        command_file = os.path.join(claude.commands, f'{name}.md')
+        with open(source_file, 'r') as src, open(command_file, 'w') as dst:
+          dst.write(src.read())
+          
+      except Exception as e:
+        print(f'Error copying prompt file for {name}: {e}')
 
     with open(install.config, 'w') as file:
       json.dump(config, file, indent=2)
@@ -413,7 +456,22 @@ class Spackle:
 
   def _build_mcp(self, name: str):
     if name not in self.mcps:
-      self.mcps[name] = self.mcp_registry[name]()
+      func = self.mcp_registry[name]
+      # Create a wrapper class for functions
+      if name == 'main':
+        class MainFunctionWrapper:
+          def __init__(self):
+            self.mcp = _init_main_mcp()
+          def serve(self):
+            return func()
+        self.mcps[name] = MainFunctionWrapper()
+      else:
+        class FunctionWrapper:
+          def __init__(self):
+            pass
+          def serve(self):
+            return func()
+        self.mcps[name] = FunctionWrapper()
     return self.mcps[name]
 
   def _color(self, text: str, color) -> str:
@@ -518,23 +576,48 @@ hook = spackle.hook
 mcp = spackle.mcp
 load = spackle.load
 prompt = spackle.prompt
+prompt_file = spackle.prompt_file
 wrap_subprocess = spackle.wrap_subprocess
 
 
 #################
 # BUILT IN MCPS #
 #################
+_main_mcp = None
+
+def _init_main_mcp():
+  global _main_mcp
+  if _main_mcp is None:
+    _main_mcp = fastmcp.FastMCP('spackle-main', on_duplicate_tools='replace')
+  return _main_mcp
+
 @spackle.mcp(name='main')
-class DefaultServer(Server):
-  def __init__(self):
-    self.mcp = fastmcp.FastMCP('spackle-main', on_duplicate_tools='replace')
-
-  def serve(self):
-    self.mcp.run()
+def default_server():
+  _init_main_mcp().run()
 
 
-from .probe import ProbeServer
-from .sqlite import SqliteServer
+from .probe import probe_server
+from .sqlite import sqlite_server
+
+
+####################
+# BUILT IN PROMPTS #
+####################
+@spackle.prompt_file
+def main():
+  return spackle.paths.prompts + '/spackle-main.md'
+
+@spackle.prompt_file
+def refresh():
+  return spackle.paths.prompts + '/spackle-refresh-user-instructions.md'
+
+@spackle.prompt_file
+def rules():
+  return spackle.paths.prompts + '/spackle-rules.md'
+
+@spackle.prompt_file
+def sketch():
+  return spackle.paths.prompts + '/spackle-sketch.md'
 
 
 ##################
@@ -613,7 +696,7 @@ class CLI:
     is_flag=True,
     help='Overwrite existing files with a clean copy from spackle',
   )
-  @click.option('--file', type=str, help='Python file to copy to the project')
+  @click.option('--file', type=str, help='Python file or function which contains decorated functions to be registered with spackle')
   @click.option(
     '--provider',
     type=click.Choice(['claude', 'foo']),
@@ -621,16 +704,15 @@ class CLI:
     help='Provider to build for (default: claude)'
   )
   def build(force, file, provider):
-    """Build the project"""
+    """Build configuration for provider and install spackle into ./spackle"""
     provider_enum = Provider(provider)
-    result = spackle.build(force=force, file=file, provider=provider_enum)
-    print(result)
+    spackle.build(force=force, file=file, provider=provider_enum)
 
   @staticmethod
   @click.command()
   @click.argument('name')
   def tool(name):
-    """Run a tool"""
+    """Run a tool defined in the main spackle MCP with @spackle.tool"""
     result = spackle.run_tool(name)
     print(result.response)
 
@@ -638,7 +720,7 @@ class CLI:
   @click.command()
   @click.argument('name')
   def hook(name):
-    """Run a hook"""
+    """Run a function declared with @spackle.hook"""
     if sys.stdin.isatty():
       example_command = spackle._color(
         f'echo foo | spackle hook {name}', spackle.colors.shell

@@ -434,6 +434,17 @@ def convert_jira_browse_url_to_xml(browse_url: str) -> str:
 
 def fetch_jira_xml_from_url(url: str, timeout: int = 10) -> str:
   jira_fields = [
+    # 'summary',
+    # 'issuetype',
+    # 'status',
+    # 'priority',
+    # 'description',
+    # 'created',
+    # 'updated',
+    # 'parent',
+    # 'subtasks',
+    # 'issuelinks'
+
     'key',
     'summary',
     'description',
@@ -452,9 +463,6 @@ def fetch_jira_xml_from_url(url: str, timeout: int = 10) -> str:
     'component',
     'labels',
     'environment',
-    'timespent',
-    'votes',
-    'watches',
   ]
 
   # Convert browse URLs to XML format

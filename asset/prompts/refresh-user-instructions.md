@@ -1,1 +1,0 @@
-Read @.spackle/prompts/user.md to refresh your memory of the most important instructions. Then, ask for your task.

@@ -42,22 +42,12 @@ class SqliteConnection:
 
 
 @spackle.mcp(name='sqlite')
-class SqliteServer:
-  def __init__(self, db_path: Optional[str] = None):
-    self.mcp = FastMCP('spackle-sqlite')
+def sqlite_server(db_path: Optional[str] = None):
+  mcp = FastMCP('spackle-sqlite')
 
-    self.db_path = Path(db_path)
-
-    # Register tools
-    self.mcp.tool(self.read_query)
-    self.mcp.tool(self.list_tables)
-    self.mcp.tool(self.describe_table)
-
-  def serve(self):
-    self.mcp.run()
+  db_path_obj = Path(db_path) if db_path else Path('database.db')
 
   def read_query(
-    self,
     query: str,
     params: Optional[List[Any]] = None,
     fetch_all: bool = True,
@@ -106,7 +96,7 @@ class SqliteServer:
 
     params = params or []
 
-    with SqliteConnection(self.db_path) as conn:
+    with SqliteConnection(db_path_obj) as conn:
       cursor = conn.cursor()
 
       try:
@@ -126,13 +116,13 @@ class SqliteServer:
       except sqlite3.Error as e:
         raise ValueError(f'Sqlite error: {str(e)}')
 
-  def list_tables(self) -> List[str]:
+  def list_tables() -> List[str]:
     """List all tables in the Messages database.
 
     Returns:
       List of table names in the database
     """
-    with SqliteConnection(self.db_path) as conn:
+    with SqliteConnection(db_path_obj) as conn:
       cursor = conn.cursor()
 
       try:
@@ -147,7 +137,7 @@ class SqliteServer:
       except sqlite3.Error as e:
         raise ValueError(f'SQLite error: {str(e)}')
 
-  def describe_table(self, table_name: str) -> List[ColumnInfo]:
+  def describe_table(table_name: str) -> List[ColumnInfo]:
     """Get detailed information about a table's schema.
 
     Args:
@@ -162,7 +152,7 @@ class SqliteServer:
       - dflt_value: Default value for the column (str or None)
       - pk: Whether the column is part of the primary key (int: 0=no, 1=yes)
     """
-    with SqlitConnection(self.db_path) as conn:
+    with SqliteConnection(db_path_obj) as conn:
       cursor = conn.cursor()
 
       try:
@@ -197,10 +187,16 @@ class SqliteServer:
       except sqlite3.Error as e:
         raise ValueError(f'SQLite error: {str(e)}')
 
+  # Register tools
+  mcp.tool(read_query)
+  mcp.tool(list_tables)
+  mcp.tool(describe_table)
+
+  mcp.run()
+
 
 def main():
-  server = SqliteServer()
-  server.serve()
+  sqlite_server()
 
 
 if __name__ == '__main__':

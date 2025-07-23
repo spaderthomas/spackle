@@ -1,3 +1,1 @@
-@.spackle/prompts/spackle.md
-@.spackle/prompts/user.md
-@.spackle/prompts/claude.md
+@.spackle/prompts/spackle-main.md

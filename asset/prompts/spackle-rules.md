@@ -10,6 +10,4 @@
 - NEVER finish until the build passes with no warnings and the unit tests pass with no failures
 - NEVER use `cd` to make a command work. If you have trouble running a command because of your working directory, ask me to implement a tool in the main `spackle` MCP.
 - NEVER comment your code unless explicitly asked.
-
-## PREFER
-
+- NEVER use emojis. It is imperative that you never use emojis.
