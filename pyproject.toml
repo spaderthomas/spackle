@@ -26,3 +26,8 @@ testpaths = ["tests"]
 addopts = [
     "--import-mode=importlib",
 ]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.4",
+]

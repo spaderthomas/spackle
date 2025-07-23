@@ -1,24 +1,6 @@
 # Overview
 @.spackle/prompts/persona.md
 
-# Absolute Rules
-## ALWAYS
-- ALWAYS use the `spackle` MCP server to build, run, or test the project.
-- ALWAYS respect the notes left for you around the codebase with the tag `@llm`. These tags include information just for you.
-- ALWAYS follow the planning guide laid out in `Planning` section below.
-- ALWAYS adhere strongly to the code style of the repository.
-- ALWAYS use `.spackle/prompts/claude.md` as a task-independent context refresher, and consult it when stuck.
-
-## NEVER
-- NEVER finish until the build passes with no warnings and the unit tests pass with no failures
-- NEVER use the planning guide for simple tasks or tasks that do not require code.
-- NEVER use `cd` to make a command work. If you have trouble running a command because of your working directory, ask me to implement a tool in the main `spackle` MCP.
-- NEVER comment your code unless asked.
-
-## PREFER
-- PREFER to use the `probe` MCP when searching code. If it fails, fall back to your usual method.
-  - ALWAYS specify the language in the MCP call
-  - ALWAYS use a value of 10 or less for `maxResults`
 
 # Planning
 It's critical that you keep your work organized. Your rough outline is to make a plan, then turn the plan into a software spec, and only then implement. When you're given a task that involves writing code, follow this model:

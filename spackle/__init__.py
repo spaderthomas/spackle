@@ -203,7 +203,6 @@ class Spackle:
     return decorator
 
   def load(self, fn: Callable) -> Callable:
-    # Execute the function immediately to run any setup/initialization code
     fn()
     return fn
 
@@ -214,7 +213,6 @@ class Spackle:
     project = ProjectPaths()
 
     # Build the Spackle config file first, so the user file is loaded if present
-    # Preserve existing file_path if no new file is specified
     config = {
       'file_path': '',
       'function_name': ''
