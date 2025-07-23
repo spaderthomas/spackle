@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import argparse
+import click
 import enum
 import importlib
 import json
@@ -16,6 +16,9 @@ import sys
 import colorama
 import pydantic
 import fastmcp
+import requests
+
+from .jira import parse_jira_to_markdown, fetch_jira_xml_from_url
 
 from abc import abstractmethod
 from collections import OrderedDict
@@ -161,30 +164,17 @@ class Spackle:
 
     self.mcps = {}
     self.tools = {}
-    self.commands = {}
     self.hooks = {}
 
   ##############
   # DECORATORS #
   ##############
-  def tool(self, fn):
+  def tool(self, fn: Callable) -> Callable:
     self.tools[fn.__name__] = fn
     self.mcps['main'].mcp.tool(fn)
     return fn
-  
-  def command(self, name=None, args=None):
-    def decorator(fn):
-      command = {
-        'func': fn,
-        'name': name or fn.__name__,
-        'args': args or []
-      }
-      self.commands[command['name']] = command
-      return fn
-      
-    return decorator
 
-  def mcp(self, name: str):
+  def mcp(self, name: str) -> Callable:
     def decorator(cls):
       mcp_name = name or cls.__name__
       if mcp_name in self.mcp_registry:
@@ -199,8 +189,8 @@ class Spackle:
 
     return decorator
 
-  def hook(self, event: HookEvent, tools: Optional[List[HookTool]] = None):
-    def decorator(fn):
+  def hook(self, event: HookEvent, tools: Optional[List[HookTool]] = None) -> Callable:
+    def decorator(fn: Callable) -> Callable:
       hook = Hook(
         name = fn.__name__,
         event = event,
@@ -208,26 +198,48 @@ class Spackle:
         fn = fn
       )
       self.hooks[hook.name] = hook
+      return fn
 
     return decorator
+
+  def load(self, fn: Callable) -> Callable:
+    # Execute the function immediately to run any setup/initialization code
+    fn()
+    return fn
 
   ############
   # COMMANDS #
   ############
-  def build(self, force: bool = False, file: str = None):
+  def build(self, force: bool = False, file: Optional[str] = None) -> None:
     project = ProjectPaths()
 
     # Build the Spackle config file first, so the user file is loaded if present
+    # Preserve existing file_path if no new file is specified
     config = {
-      'file_path': ''
+      'file_path': '',
+      'function_name': ''
     }
+    
+    # Load existing config if present
+    if os.path.exists(project.config) and not file:
+      with open(project.config, 'r') as f:
+        existing_config = json.load(f)
+        config['file_path'] = existing_config.get('file_path', '')
+        config['function_name'] = existing_config.get('function_name', '')
 
     if file:
-      file_path = os.path.join(project.root, file)
+      # Parse file:function format
+      function_name = None
+      if ':' in file:
+        file_path, function_name = file.split(':', 1)
+      else:
+        file_path = file
+      
+      file_path = os.path.join(project.root, file_path)
       config['file_path'] = file_path
-      module_name = 'spackle_user'
+      config['function_name'] = function_name or ''
 
-      if not self._load_user_file_from_path(file_path):
+      if not self._load_user_file_from_path(file_path, function_name):
         print(f'{self._color(file_path, self.colors.error)} does not exist; exiting')
         exit(1)
 
@@ -285,17 +297,17 @@ class Spackle:
       with open(project.settings, 'w') as file:
         json.dump(settings, file, indent=2)
   
-  def run_server(self, name: str):
+  def run_server(self, name: str) -> None:
     self._load_user_file_from_config()
 
     self._build_mcp(name).serve()
 
-  def run_tool(self, name: str):
+  def run_tool(self, name: str) -> McpResult:
     self._load_user_file_from_config()
 
     return self.tools[name]()
 
-  def run_hook(self, name: str, request: str):
+  def run_hook(self, name: str, request: str) -> None:
     self._load_user_file_from_config()
 
     context = HookContext(self.hooks[name], request)
@@ -411,7 +423,7 @@ class Spackle:
     })
     return hooks[hook.event.value][-1]
 
-  def _load_user_file_from_path(self, file_path: str) -> bool:
+  def _load_user_file_from_path(self, file_path: str, function_name: Optional[str] = None) -> bool:
     module_name = 'spackle_user'
 
     if not os.path.exists(file_path):
@@ -422,6 +434,14 @@ class Spackle:
       module = importlib.util.module_from_spec(spec)
       sys.modules[module_name] = module
       spec.loader.exec_module(module)
+      
+      # If a specific function is specified, call it
+      if function_name:
+        func = getattr(module, function_name, None)
+        if func is None:
+          print(f"Function '{function_name}' not found in '{file_path}'", file=sys.stderr)
+          exit(1)
+        func()
     except Exception as e:
       print(e, file=sys.stderr)
       exit(1)
@@ -436,7 +456,8 @@ class Spackle:
 
     with open(project.config, 'r') as file:
       config = json.load(file)
-      return self._load_user_file_from_path(config['file_path'])
+      function_name = config.get('function_name', None)
+      return self._load_user_file_from_path(config['file_path'], function_name if function_name else None)
 
   def _canonicalize_path(self, path: str) -> str:
     return pathlib.Path(path).resolve()
@@ -466,6 +487,7 @@ def wsl_to_windows(wsl_path: str) -> str:
 tool = spackle.tool
 hook = spackle.hook
 mcp = spackle.mcp
+load = spackle.load
 wrap_subprocess = spackle.wrap_subprocess
 
 
@@ -482,6 +504,7 @@ class DefaultServer(Server):
 
 from .probe import ProbeServer
 from .sqlite import SqliteServer
+from .jira import parse_jira_to_markdown
 
 ##################
 # BUILT IN TOOLS #
@@ -497,9 +520,14 @@ def build() -> McpResult:
   )
 
 @spackle.tool
-def run() -> str:
+def run() -> McpResult:
   """Run the project"""
-  return 'The run command has not been implemented in this project. It is imperative that you do not try to run the project through other means; instead, ask what to do.',
+  return McpResult(
+    return_code = 0,
+    response = 'The run command has not been implemented in this project. It is imperative that you do not try to run the project through other means; instead, ask what to do.',
+    stderr = '',
+    stdout = '',
+  )
 
 @spackle.tool
 def test() -> McpResult:
@@ -547,86 +575,140 @@ def ensure_spackle_templates_are_read_only(context: HookContext):
 #######
 # CLI #
 #######
-# spackle build
-@spackle.command(
-  name = 'build',
-  args = [
-    ('--force', 'store_true', 'Overwrite existing files with a clean copy from spackle'),
-    ('--file', str, 'Python file to copy to the project')
-  ]
-)
-def run_build(force=False, file: str = None):
-  spackle.build(force=force, file=file)
+class CLI:
+  @staticmethod
+  @click.command()
+  @click.option('--force', is_flag=True, help='Overwrite existing files with a clean copy from spackle')
+  @click.option('--file', type=str, help='Python file to copy to the project')
+  def build(force, file):
+    """Build the project"""
+    result = spackle.build(force=force, file=file)
+    print(result)
 
-# spackle tool
-@spackle.command(
-  name = 'tool',
-  args = [
-    ('name', str, 'Name of the tool to call')
-  ]
-)
-def run_tool(name: str):
-  return spackle.run_tool(name)
+  @staticmethod
+  @click.command()
+  @click.argument('name')
+  def tool(name):
+    """Run a tool"""
+    result = spackle.run_tool(name)
+    print(result.response)
 
-# spackle hook
-@spackle.command(
-  name = 'hook',
-  args = [
-    ('name', str, 'Name of the hook to invoke')
-  ]
-)
-def run_hook(name: str):
-  if sys.stdin.isatty():
-    example_command = spackle._color(f'echo foo | spackle hook {name}', spackle.colors.shell)
-    print(f"Since hooks are only useful insofar as they are called by Claude, you can't invoke a hook without passing the JSON request via stdin (e.g. {example_command})")
-    return
+  @staticmethod
+  @click.command()
+  @click.argument('name')
+  def hook(name):
+    """Run a hook"""
+    if sys.stdin.isatty():
+      example_command = spackle._color(f'echo foo | spackle hook {name}', spackle.colors.shell)
+      print(f"Since hooks are only useful insofar as they are called by Claude, you can't invoke a hook without passing the JSON request via stdin (e.g. {example_command})")
+      return
 
-  spackle.run_hook(name, sys.stdin.read())
+    spackle.run_hook(name, sys.stdin.read())
 
-# spackle serve
-@spackle.command(
-  name = 'serve',
-  args = [
-    ('name', str, 'Name of the MCP server to run')
-  ]
-)
-def serve(name: str = None):
-  spackle.run_server(name)
+  @staticmethod
+  @click.command()
+  @click.argument('name')
+  def serve(name):
+    """Serve an MCP server"""
+    spackle.run_server(name)
 
-# spackle debug
-@spackle.command()
-def debug():
-  create_task('asdf')
+  @staticmethod
+  @click.command()
+  @click.argument('url', required=False, default='https://httpbin.org/get')
+  def debug(url):
+    """Debug command to test HTTP requests"""
+    try:
+      print(f"Making request to: {url}")
+      response = requests.get(url, timeout=10)
+      print(f"Status Code: {response.status_code}")
+      print(f"Response Headers: {dict(response.headers)}")
+      print(f"Response Content:")
+      print(response.text)
+    except requests.RequestException as e:
+      print(f"Request failed: {e}", file=sys.stderr)
+    except Exception as e:
+      print(f"Unexpected error: {e}", file=sys.stderr)
+
+  @staticmethod
+  @click.command()
+  @click.argument('source', required=False)
+  @click.option('-o', '--output', type=click.Path(), help='Output file (default: stdout)')
+  def jira(source, output):
+    """Parse Jira RSS/XML export to markdown
+    
+    SOURCE can be:
+    - A file path to an XML file
+    - A Jira URL (browse or XML format)
+    - If omitted, reads from stdin
+    """
+    
+    xml_content = None
+
+    if source:
+      # Check if source looks like a URL
+      if source.startswith(('http://', 'https://')):
+        # It's a URL - fetch it
+        try:
+          xml_content = fetch_jira_xml_from_url(source, timeout=10)
+        except requests.RequestException as e:
+          print(f"Error fetching URL: {e}", file=sys.stderr)
+          return
+        except Exception as e:
+          print(f"Error processing URL: {e}", file=sys.stderr)
+          return
+      else:
+        # It's a file path
+        try:
+          with open(source, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+        except FileNotFoundError:
+          print(f"Error: File '{source}' not found", file=sys.stderr)
+          return
+        except Exception as e:
+          print(f"Error reading file: {e}", file=sys.stderr)
+          return
+    elif not sys.stdin.isatty():
+      # Read from stdin
+      xml_content = sys.stdin.read()
+    else:
+      print("Error: Please provide a file path, URL, or pipe XML data to stdin")
+      print("Usage: spackle jira <file.xml> [-o output.md]")
+      print("   or: spackle jira <jira-url> [-o output.md]")
+      print("   or: cat file.xml | spackle jira [-o output.md]")
+      return
+    
+    if not xml_content:
+      print("Error: No XML content to process", file=sys.stderr)
+      return
+    
+    try:
+      result = parse_jira_to_markdown(xml_content)
+      if output:
+        with open(output, 'w', encoding='utf-8') as f:
+          f.write(result)
+        print(f"Output written to {output}")
+      else:
+        print(result)
+    except Exception as e:
+      print(f"Error parsing Jira XML: {e}", file=sys.stderr)
+
+
+@click.group()
+def cli():
+  """Spackle - MCP server for build, test, and run tools"""
+  pass
+
+# Register commands
+cli.add_command(CLI.build)
+cli.add_command(CLI.tool)
+cli.add_command(CLI.hook)
+cli.add_command(CLI.serve)
+cli.add_command(CLI.debug)
+cli.add_command(CLI.jira)
 
 
 ########
 # MAIN #
 ########
 def main():
-  parser = argparse.ArgumentParser(description='Spackle - MCP server for build, test, and run tools')
-  subparsers = parser.add_subparsers(dest='command', help='Available commands')
-  
-  # Create subparser for each command
-  for cmd_name, cmd_info in spackle.commands.items():
-    cmd_fn = cmd_info['func']
-    subparser = subparsers.add_parser(cmd_name, help=cmd_fn.__doc__)
-    for arg_spec in cmd_info.get('args', []):
-      if len(arg_spec) == 3:
-        arg_name, arg_type, arg_help = arg_spec
-        if arg_type == 'store_true':
-          subparser.add_argument(arg_name, action='store_true', help=arg_help)
-        else:
-          subparser.add_argument(arg_name, type=arg_type, help=arg_help)
-      else:
-        subparser.add_argument(*arg_spec)
-  
-  args = parser.parse_args()
-
-  if args.command in spackle.commands:
-    cmd_info = spackle.commands[args.command]
-    # Extract command-specific arguments
-    cmd_args = {k: v for k, v in vars(args).items() if k != 'command'}
-
-    cmd_info['func'](**cmd_args)
-  else:
-    parser.print_help()
+  cli()

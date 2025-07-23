@@ -5,9 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "click>=8.2.1",
     "colorama>=0.4.6",
     "fastmcp>=2.10.5",
+    "lxml>=6.0.0",
     "pydantic>=2.11.7",
+    "pytest>=8.4.1",
+    "requests>=2.32.4",
 ]
 
 [tool.setuptools]
@@ -15,3 +19,10 @@ packages = ["spackle"]
 
 [project.scripts]
 spackle = "spackle:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = [
+    "--import-mode=importlib",
+]

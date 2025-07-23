@@ -1,8 +1,6 @@
 profiles = {
   'permissive': {
     "allow": [
-      "Bash(*)",
-      "Bash(*:*)",
       "Bash(awk:*)",
       "Bash(cat:*)",
       "Bash(cp:*)",
@@ -11,7 +9,6 @@ profiles = {
       "Bash(df:*)",
       "Bash(echo:*)",
       "Bash(find:*)",
-      "Bash(free:*)",
       "Bash(head:*)",
       "Bash(htop:*)",
       "Bash(id:*)",

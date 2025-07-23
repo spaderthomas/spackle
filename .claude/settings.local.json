@@ -87,7 +87,13 @@
       "mcp__spry__search_forward",
       "mcp__probe__extract_code",
       "Bash(./spry.exe --test --success --duration)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "Bash(spackle debug:*)",
+      "Bash(spackle tool:*)",
+      "Bash(spackle hook:*)",
+      "Bash(spackle jira:*)",
+      "WebFetch(domain:developer.atlassian.com)",
+      "WebFetch(domain:probeai.dev)"
     ]
   },
   "enableAllProjectMcpServers": true
