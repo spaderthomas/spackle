@@ -223,3 +223,102 @@ def test_spackle_build_with_foo_provider(temp_project_dir):
   
   mcp_config = temp_project_dir / '.mcp.json'
   assert not mcp_config.exists(), '.mcp.json should NOT be created for foo provider'
+
+
+def test_spackle_build_creates_slash_commands(temp_project_dir, test_user_code_file):
+  """Test that spackle build creates slash command files from @prompt decorators"""
+  
+  # Create a test file with prompt decorators
+  test_code = """#!/usr/bin/env python
+
+import spackle
+
+@spackle.load
+def setup_prompts():
+    @spackle.prompt
+    def compact():
+        return "Make the code more compact and remove unnecessary whitespace."
+    
+    @spackle.prompt
+    def verbose():
+        return "Add detailed comments and explanations to make the code more verbose."
+"""
+
+  test_file = temp_project_dir / 'test_prompts.py'
+  test_file.write_text(test_code)
+
+  # Run spackle build with the test file
+  success, stdout, stderr = run_command(f'spackle build --file {test_file.name}', cwd=temp_project_dir)
+  assert success, f'spackle build with prompts failed: {stderr}'
+  
+  # Check that .claude/commands directory is created
+  commands_dir = temp_project_dir / '.claude' / 'commands'
+  assert commands_dir.exists(), '.claude/commands directory should be created'
+  
+  # Check that slash command files are generated
+  compact_file = commands_dir / 'compact.md'
+  assert compact_file.exists(), 'compact.md should be created in .claude/commands'
+  
+  verbose_file = commands_dir / 'verbose.md'
+  assert verbose_file.exists(), 'verbose.md should be created in .claude/commands'
+  
+  # Verify the content of the generated files
+  compact_content = compact_file.read_text()
+  assert compact_content == "Make the code more compact and remove unnecessary whitespace."
+  
+  verbose_content = verbose_file.read_text()
+  assert verbose_content == "Add detailed comments and explanations to make the code more verbose."
+
+
+def test_prompt_decorator_without_build():
+  """Test that the prompt decorator stores functions correctly"""
+  import spackle
+  
+  # Clear any existing prompts
+  spackle.spackle.prompts.clear()
+  
+  @spackle.prompt
+  def test_command():
+    return "This is a test prompt."
+  
+  # Verify the function was stored
+  assert 'test_command' in spackle.spackle.prompts
+  assert spackle.spackle.prompts['test_command'] == test_command
+  
+  # Verify calling the function returns the expected string
+  result = spackle.spackle.prompts['test_command']()
+  assert result == "This is a test prompt."
+
+
+def test_spackle_config_includes_provider(temp_project_dir):
+  """Test that the spackle config includes the provider information"""
+  
+  # Run spackle build with default (claude) provider
+  success, stdout, stderr = run_command('spackle build', cwd=temp_project_dir)
+  assert success, f'spackle build failed: {stderr}'
+  
+  # Check that the config file contains the provider
+  config_file = temp_project_dir / '.spackle' / 'settings.json'
+  assert config_file.exists(), '.spackle/settings.json should exist'
+  
+  with open(config_file, 'r') as f:
+    config = json.load(f)
+    assert 'provider' in config, 'Config should contain provider field'
+    assert config['provider'] == 'claude', 'Default provider should be claude'
+
+
+def test_spackle_config_includes_foo_provider(temp_project_dir):
+  """Test that the spackle config includes the foo provider when specified"""
+  
+  # Run spackle build with foo provider
+  success, stdout, stderr = run_command('spackle build --provider foo', cwd=temp_project_dir)
+  assert success, f'spackle build --provider foo failed: {stderr}'
+  
+  # Check that the config file contains the provider
+  config_file = temp_project_dir / '.spackle' / 'settings.json'
+  assert config_file.exists(), '.spackle/settings.json should exist'
+  
+  with open(config_file, 'r') as f:
+    config = json.load(f)
+    assert 'provider' in config, 'Config should contain provider field'
+    assert config['provider'] == 'foo', 'Provider should be foo when specified'

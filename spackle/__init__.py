@@ -40,7 +40,7 @@ from .profiles import profiles
 #########
 # PATHS #
 #########
-class Paths:
+class SpacklePaths:
   def __init__(self):
     self.file = os.path.dirname(os.path.abspath(__file__))
     self.project = os.path.realpath(os.path.join(self.file, '..'))
@@ -54,13 +54,9 @@ class Paths:
     self.templates = os.path.join(self.asset, 'templates')
 
 
-class ClaudePaths:
+class InstallPaths:
   def __init__(self):
     self.root: str = os.getcwd()
-    self.claude_md: str = os.path.join(self.root, 'CLAUDE.md')
-    self.mcp_config: str = os.path.join(self.root, '.mcp.json')
-    self.claude: str = os.path.join(self.root, '.claude')
-    self.settings: str = os.path.join(self.claude, 'settings.local.json')
     self.spackle: str = os.path.join(self.root, '.spackle')
     self.tasks: str = os.path.join(self.spackle, 'tasks')
     self.templates: str = os.path.join(self.spackle, 'templates')
@@ -69,6 +65,16 @@ class ClaudePaths:
     self.claude_prompt: str = os.path.join(self.prompts, 'claude.md')
     self.spackle_prompt: str = os.path.join(self.prompts, 'spackle.md')
     self.config: str = os.path.join(self.spackle, 'settings.json')
+
+
+class ClaudePaths:
+  def __init__(self):
+    self.root: str = os.getcwd()
+    self.claude_md: str = os.path.join(self.root, 'CLAUDE.md')
+    self.mcp_config: str = os.path.join(self.root, '.mcp.json')
+    self.claude: str = os.path.join(self.root, '.claude')
+    self.settings: str = os.path.join(self.claude, 'settings.local.json')
+    self.commands: str = os.path.join(self.claude, 'commands')
 
 
 #######
@@ -171,13 +177,14 @@ class Spackle:
     colorama.init()
     self.colors = Spackle.Colors()
 
-    self.paths = Paths()
+    self.paths = SpacklePaths()
 
     self.mcp_registry = {}
 
     self.mcps = {}
     self.tools = {}
     self.hooks = {}
+    self.prompts = {}
 
   ##############
   # DECORATORS #
@@ -214,12 +221,16 @@ class Spackle:
     fn()
     return fn
 
+  def prompt(self, fn: Callable) -> Callable:
+    self.prompts[fn.__name__] = fn
+    return fn
+
   ############
   # COMMANDS #
   ############
   def build(self, force: bool = False, file: Optional[str] = None, provider: Provider = Provider.Claude) -> None:
     # Build the Spackle config file first, so the user file is loaded if present
-    config = {'file_path': '', 'function_name': ''}
+    config = {'file_path': '', 'function_name': '', 'provider': provider.value}
 
     match provider:
       case Provider.Claude:
@@ -230,11 +241,12 @@ class Spackle:
         raise ValueError(f"Unsupported provider: {provider}")
 
   def _build_claude(self, force: bool, file: str | None, config: dict) -> None:
-    project = ClaudePaths()
+    claude = ClaudePaths()
+    install = InstallPaths()
 
     # Load existing config if present
-    if os.path.exists(project.config) and not file:
-      with open(project.config, 'r') as f:
+    if os.path.exists(install.config) and not file:
+      with open(install.config, 'r') as f:
         existing_config = json.load(f)
         config['file_path'] = existing_config.get('file_path', '')
         config['function_name'] = existing_config.get('function_name', '')
@@ -248,7 +260,7 @@ class Spackle:
       else:
         file_path = file
 
-      file_path = os.path.join(project.root, file_path)
+      file_path = os.path.join(install.root, file_path)
       config['file_path'] = file_path
       config['function_name'] = function_name or ''
 
@@ -265,16 +277,16 @@ class Spackle:
     }
 
     # Set up the filesystem
-    is_new_project = not os.path.exists(project.spackle)
-    is_existing_claude_config = os.path.exists(project.claude_md) or os.path.exists(
-      project.settings
+    is_new_project = not os.path.exists(install.spackle)
+    is_existing_claude_config = os.path.exists(claude.claude_md) or os.path.exists(
+      claude.settings
     )
     if is_new_project and is_existing_claude_config and not force:
       print(
         f'You are initializing a new project, but already have Claude configurations. spackle needs to own (i.e. have overwrite access):'
       )
-      print(f'  - {self._color(project.mcp_config, self.colors.item)}')
-      print(f'  - {self._color(project.settings, self.colors.item)}')
+      print(f'  - {self._color(claude.mcp_config, self.colors.item)}')
+      print(f'  - {self._color(claude.settings, self.colors.item)}')
 
       rerun = ['spackle'] + sys.argv[1:]
       print(
@@ -282,44 +294,54 @@ class Spackle:
       )
       exit()
 
-    os.makedirs(project.claude, exist_ok=True)
-    os.makedirs(project.spackle, exist_ok=True)
-    os.makedirs(project.prompts, exist_ok=True)
+    os.makedirs(claude.claude, exist_ok=True)
+    os.makedirs(claude.commands, exist_ok=True)
+    os.makedirs(install.spackle, exist_ok=True)
+    os.makedirs(install.prompts, exist_ok=True)
 
     # Never overwrite the stuff that Claude uses at runtime
-    self._copy_dir_file(self.paths.prompts, project.prompts, 'user.md')
-    self._copy_dir_file(self.paths.prompts, project.prompts, 'claude.md')
-    self._copy_tree(self.paths.tasks, project.tasks)
+    self._copy_dir_file(self.paths.prompts, install.prompts, 'user.md')
+    self._copy_dir_file(self.paths.prompts, install.prompts, 'claude.md')
+    self._copy_tree(self.paths.tasks, install.tasks)
 
     # Always overwrite our internal read only stuff
-    self._copy_dir_file(self.paths.prompts, project.prompts, 'spackle.md', force=True)
-    self._copy_tree(self.paths.templates, project.templates, force=True)
+    self._copy_dir_file(self.paths.prompts, install.prompts, 'spackle.md', force=True)
+    self._copy_tree(self.paths.templates, install.templates, force=True)
 
-    with open(project.config, 'w') as file:
+    # Generate slash command files
+    for name, fn in self.prompts.items():
+      try:
+        content = fn()        
+        command_file = os.path.join(claude.commands, f'{name}.md')
+        with open(command_file, 'w') as f:
+          f.write(content)
+          
+      except Exception as e:
+        print(f'Error generating prompt file for {name}: {e}')
+
+    with open(install.config, 'w') as file:
       json.dump(config, file, indent=2)
 
     # Overwrite configuration files if we're asked to
-    self._copy_file(self.paths.mcp_config, project.mcp_config, force=force, log=True)
-    self._copy_file(self.paths.claude_md, project.claude_md, force=force, log=True)
+    self._copy_file(self.paths.mcp_config, claude.mcp_config, force=force, log=True)
+    self._copy_file(self.paths.claude_md, claude.claude_md, force=force, log=True)
 
     overwrite_settings = True
-    if os.path.exists(project.settings):
+    if os.path.exists(claude.settings):
       overwrite_settings = force
 
-    self._log_copy_action('generated file', project.settings, overwrite_settings)
+    self._log_copy_action('generated file', claude.settings, overwrite_settings)
     if overwrite_settings:
-      with open(project.settings, 'w') as file:
+      with open(claude.settings, 'w') as file:
         json.dump(settings, file, indent=2)
 
   def _build_foo(self, force: bool, file: str | None, config: dict) -> None:
     # Default provider implementation - just creates .spackle directory structure
-    project_root = os.getcwd()
-    spackle_dir = os.path.join(project_root, '.spackle')
+    install = InstallPaths()
     
-    os.makedirs(spackle_dir, exist_ok=True)
-    config_file = os.path.join(spackle_dir, 'settings.json')
+    os.makedirs(install.spackle, exist_ok=True)
     
-    with open(config_file, 'w') as f:
+    with open(install.config, 'w') as f:
       json.dump(config, f, indent=2)
     
     print(f"Created basic .spackle structure for provider 'foo'")
@@ -451,12 +473,12 @@ class Spackle:
     return True
 
   def _load_user_file_from_config(self) -> bool:
-    project = ClaudePaths()
+    install = InstallPaths()
 
-    if not os.path.exists(project.config):
+    if not os.path.exists(install.config):
       return False
 
-    with open(project.config, 'r') as file:
+    with open(install.config, 'r') as file:
       config = json.load(file)
       function_name = config.get('function_name', None)
       return self._load_user_file_from_path(
@@ -495,6 +517,7 @@ tool = spackle.tool
 hook = spackle.hook
 mcp = spackle.mcp
 load = spackle.load
+prompt = spackle.prompt
 wrap_subprocess = spackle.wrap_subprocess
 
 
@@ -558,22 +581,22 @@ def test() -> McpResult:
   tools=[HookTool.Edit, HookTool.MultiEdit, HookTool.Write],
 )
 def ensure_spackle_templates_are_read_only(context: HookContext):
-  project = ProjectPaths()
+  install = InstallPaths()
   file_path = context.request['tool_input']['file_path']
   file_path = spackle._canonicalize_path(file_path)
 
-  message = f'You are not allowed to edit that file in {project.spackle}. Do not make a copy with your edits in a different location; ask me what you should do.'
+  message = f'You are not allowed to edit that file in {install.spackle}. Do not make a copy with your edits in a different location; ask me what you should do.'
 
-  if spackle._is_file_path_within(file_path, project.templates):
+  if spackle._is_file_path_within(file_path, install.templates):
     context.deny(message)
 
-  if spackle._is_file_path_equal(file_path, project.user_prompt):
+  if spackle._is_file_path_equal(file_path, install.user_prompt):
     context.deny(message)
 
-  if spackle._is_file_path_equal(file_path, project.spackle_prompt):
+  if spackle._is_file_path_equal(file_path, install.spackle_prompt):
     context.deny(message)
 
-  if spackle._is_file_path_equal(file_path, project.settings):
+  if spackle._is_file_path_equal(file_path, install.config):
     context.deny(message)
 
   context.allow()
