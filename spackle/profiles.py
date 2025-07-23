@@ -48,7 +48,6 @@ profiles = {
       'mcp__spackle-main__build',
       'mcp__spackle-main__run',
       'mcp__spackle-main__test',
-      'mcp__spackle-main__create_task',
     ],
     'deny': ['Bash(grep:*)'],
   }

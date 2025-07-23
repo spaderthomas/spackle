@@ -166,3 +166,60 @@ def load_other_tools():
   )
   assert success, f'spackle tool specific_tool failed: {stderr}'
   assert 'Specific tool loaded!' in stdout
+
+
+def test_spackle_build_creates_claude_files(temp_project_dir):
+  """Test that spackle build creates the necessary Claude configuration files"""
+  
+  # Run spackle build
+  success, stdout, stderr = run_command('spackle build', cwd=temp_project_dir)
+  assert success, f'spackle build failed: {stderr}'
+  
+  # Check that CLAUDE.md is created
+  claude_md = temp_project_dir / 'CLAUDE.md'
+  assert claude_md.exists(), 'CLAUDE.md should be created by spackle build'
+  
+  # Check that .claude directory and settings.local.json are created
+  claude_dir = temp_project_dir / '.claude'
+  assert claude_dir.exists(), '.claude directory should be created by spackle build'
+  
+  settings_file = claude_dir / 'settings.local.json'
+  assert settings_file.exists(), '.claude/settings.local.json should be created by spackle build'
+  
+  # Verify the settings file contains expected structure
+  with open(settings_file, 'r') as f:
+    settings = json.load(f)
+    assert 'permissions' in settings, 'settings should contain permissions'
+    assert 'enabledMcpjsonServers' in settings, 'settings should contain enabledMcpjsonServers'
+    assert 'spackle-main' in settings['enabledMcpjsonServers'], 'spackle-main should be enabled'
+    assert 'spackle-probe' in settings['enabledMcpjsonServers'], 'spackle-probe should be enabled'
+  
+  # Check that .mcp.json is created  
+  mcp_config = temp_project_dir / '.mcp.json'
+  assert mcp_config.exists(), '.mcp.json should be created by spackle build'
+
+
+def test_spackle_build_with_foo_provider(temp_project_dir):
+  """Test that spackle build with --provider foo creates minimal structure"""
+  
+  # Run spackle build with foo provider
+  success, stdout, stderr = run_command('spackle build --provider foo', cwd=temp_project_dir)
+  assert success, f'spackle build --provider foo failed: {stderr}'
+  
+  # Check that .spackle directory is created
+  spackle_dir = temp_project_dir / '.spackle'
+  assert spackle_dir.exists(), '.spackle directory should be created by spackle build --provider foo'
+  
+  # Check that settings.json is created
+  settings_file = spackle_dir / 'settings.json'
+  assert settings_file.exists(), '.spackle/settings.json should be created by spackle build --provider foo'
+  
+  # Check that Claude-specific files are NOT created
+  claude_md = temp_project_dir / 'CLAUDE.md'
+  assert not claude_md.exists(), 'CLAUDE.md should NOT be created for foo provider'
+  
+  claude_dir = temp_project_dir / '.claude'
+  assert not claude_dir.exists(), '.claude directory should NOT be created for foo provider'
+  
+  mcp_config = temp_project_dir / '.mcp.json'
+  assert not mcp_config.exists(), '.mcp.json should NOT be created for foo provider'

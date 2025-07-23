@@ -18,6 +18,14 @@ import pydantic
 import fastmcp
 import requests
 
+
+##########
+# ENUMS  #
+##########
+class Provider(enum.Enum):
+  Claude = "claude"
+  Foo = "foo"
+
 from .jira import parse_jira_to_markdown, fetch_jira_xml_from_url
 
 from abc import abstractmethod
@@ -46,7 +54,7 @@ class Paths:
     self.templates = os.path.join(self.asset, 'templates')
 
 
-class ProjectPaths:
+class ClaudePaths:
   def __init__(self):
     self.root: str = os.getcwd()
     self.claude_md: str = os.path.join(self.root, 'CLAUDE.md')
@@ -209,11 +217,20 @@ class Spackle:
   ############
   # COMMANDS #
   ############
-  def build(self, force: bool = False, file: Optional[str] = None) -> None:
-    project = ProjectPaths()
-
+  def build(self, force: bool = False, file: Optional[str] = None, provider: Provider = Provider.Claude) -> None:
     # Build the Spackle config file first, so the user file is loaded if present
     config = {'file_path': '', 'function_name': ''}
+
+    match provider:
+      case Provider.Claude:
+        self._build_claude(force, file, config)
+      case Provider.Foo:
+        self._build_foo(force, file, config)
+      case _:
+        raise ValueError(f"Unsupported provider: {provider}")
+
+  def _build_claude(self, force: bool, file: str | None, config: dict) -> None:
+    project = ClaudePaths()
 
     # Load existing config if present
     if os.path.exists(project.config) and not file:
@@ -221,6 +238,7 @@ class Spackle:
         existing_config = json.load(f)
         config['file_path'] = existing_config.get('file_path', '')
         config['function_name'] = existing_config.get('function_name', '')
+        config['foo'] = existing_config.get('function_name', '')
 
     if file:
       # Parse file:function format
@@ -293,6 +311,19 @@ class Spackle:
       with open(project.settings, 'w') as file:
         json.dump(settings, file, indent=2)
 
+  def _build_foo(self, force: bool, file: str | None, config: dict) -> None:
+    # Default provider implementation - just creates .spackle directory structure
+    project_root = os.getcwd()
+    spackle_dir = os.path.join(project_root, '.spackle')
+    
+    os.makedirs(spackle_dir, exist_ok=True)
+    config_file = os.path.join(spackle_dir, 'settings.json')
+    
+    with open(config_file, 'w') as f:
+      json.dump(config, f, indent=2)
+    
+    print(f"Created basic .spackle structure for provider 'foo'")
+
   def run_server(self, name: str) -> None:
     self._load_user_file_from_config()
 
@@ -313,38 +344,6 @@ class Spackle:
   def wrap_subprocess(self, *args, **kwargs):
     kwargs['stdin'] = subprocess.DEVNULL
     return subprocess.run(*args, **kwargs)
-
-  #########
-  # TOOLS #
-  #########
-  def create_task(self, task_name: str):
-    paths = ProjectPaths()
-    os.makedirs(paths.tasks, exist_ok=True)
-
-    max_number = 0
-    if os.path.exists(paths.tasks):
-      for filename in os.listdir(paths.tasks):
-        if filename[:3].isdigit() and filename[3:4] == '_':
-          try:
-            number = int(filename[:3])
-            max_number = max(max_number, number)
-          except ValueError:
-            pass
-
-    next_number = max_number + 1
-    task_path = os.path.join(paths.tasks, f'{next_number:03d}_{task_name}')
-
-    os.makedirs(task_path, exist_ok=True)
-
-    files = ['plan.md', 'spec.md', 'scratch.md']
-    for file in files:
-      self._copy_file(
-        os.path.join(self.paths.templates, file),
-        os.path.join(task_path, file),
-        force=True,
-      )
-
-    return task_path
 
   #############
   # UTILITIES #
@@ -452,7 +451,7 @@ class Spackle:
     return True
 
   def _load_user_file_from_config(self) -> bool:
-    project = ProjectPaths()
+    project = ClaudePaths()
 
     if not os.path.exists(project.config):
       return False
@@ -513,7 +512,6 @@ class DefaultServer(Server):
 
 from .probe import ProbeServer
 from .sqlite import SqliteServer
-from .jira import parse_jira_to_markdown
 
 
 ##################
@@ -550,13 +548,6 @@ def test() -> McpResult:
     stderr='',
     stdout='',
   )
-
-
-@spackle.tool
-def create_task(task_name: str) -> str:
-  """Builds the scaffolding for a new task using the plan -> spec -> code method"""
-  task_path = spackle.create_task(task_name)
-  return f'{task_path} was created for the task {task_name}. Your plan, spec, and to-do file are inside. Read them to familiarize yourself and follow any given instruction.'
 
 
 ##################
@@ -600,9 +591,16 @@ class CLI:
     help='Overwrite existing files with a clean copy from spackle',
   )
   @click.option('--file', type=str, help='Python file to copy to the project')
-  def build(force, file):
+  @click.option(
+    '--provider',
+    type=click.Choice(['claude', 'foo']),
+    default='claude',
+    help='Provider to build for (default: claude)'
+  )
+  def build(force, file, provider):
     """Build the project"""
-    result = spackle.build(force=force, file=file)
+    provider_enum = Provider(provider)
+    result = spackle.build(force=force, file=file, provider=provider_enum)
     print(result)
 
   @staticmethod
