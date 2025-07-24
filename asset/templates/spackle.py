@@ -26,3 +26,4 @@ def test() -> spackle.McpResult:
     stdout = '',
     response = 'There is nothing to test in this project'
   )
+

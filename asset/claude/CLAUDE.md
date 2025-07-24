@@ -1,1 +1,0 @@
-@.spackle/prompts/spackle-main.md

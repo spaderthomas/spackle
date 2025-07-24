@@ -5,6 +5,7 @@
 - ALWAYS adhere strongly to the code style of the repository.Y
 - ALWAYS to use the `probe` MCP when searching code. If it fails, fall back to your usual method.
   - PREFER to read @.spackle/prompts/probe-usage-guide.md before you begin searching code
+- ALWAYS write artifacts to @.spackle/output -- this includes summaries, plans, temporary files from scripts.
 
 ## NEVER
 - NEVER finish until the build passes with no warnings and the unit tests pass with no failures

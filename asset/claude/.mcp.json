@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "spackle-main": { "command": "uv", "args": ["run", "spackle", "serve", "main"]  },
-    "spackle-probe":   { "command": "uv", "args": ["run", "spackle", "serve", "probe"]  },
-    "spackle-sqlite":   { "command": "uv", "args": ["run", "spackle", "serve", "sqlite"]  }
-  }
-}

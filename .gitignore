@@ -13,3 +13,7 @@ uv.lock
 
 .spackle/*
 !.spackle/spackle.py
+!.spackle/spackle.md
+CLAUDE.md
+.mcp.json
+.claude/
