@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 
 import colorama
 import pydantic
@@ -169,6 +170,7 @@ class Spackle:
     shell = colorama.Fore.LIGHTYELLOW_EX
     arrow = colorama.Fore.LIGHTGREEN_EX
     error = colorama.Fore.LIGHTRED_EX
+    add = colorama.Fore.LIGHTGREEN_EX
 
   def __init__(self):
     colorama.init()
@@ -230,7 +232,7 @@ class Spackle:
     claude = ClaudePaths()
     install = InstallPaths()
 
-    shutil.rmtree(install.spackle, ignore_errors=True)
+    self._remove_dir_except_files(install.spackle, [install.user_md, install.user_py])
 
     shutil.rmtree(claude.claude, ignore_errors=True)
     if os.path.exists(claude.claude_md):
@@ -238,14 +240,14 @@ class Spackle:
     if os.path.exists(claude.mcp_config):
       os.remove(claude.mcp_config)
   
-  def build(self, force: bool = False, provider: Provider = Provider.Claude) -> None:        
+  def build(self, overwrite_provider: bool = False, provider: Provider = Provider.Claude) -> None:        
     match provider:
       case Provider.Claude:
-        self._build_claude(force)
+        self._build_claude(overwrite_provider)
       case _:
         raise ValueError(f"Unsupported provider: {provider}")
 
-  def _build_claude(self, force: bool) -> None:
+  def _build_claude(self, overwrite_provider: bool) -> None:
     claude = ClaudePaths()
     install = InstallPaths()
 
@@ -254,9 +256,9 @@ class Spackle:
     is_claude_settings = os.path.exists(claude.settings)
     is_claude_mcp = os.path.exists(claude.mcp_config)
     is_existing_claude = is_claude_md or is_claude_settings or is_claude_mcp
-    if is_existing_claude and not force:
-      print(f'You ran {self._color("spackle build", self.colors.item)}, but already have Claude configurations. spackle needs to own (i.e. have overwrite access) {self._color(claude.mcp_config, self.colors.item)} and {self._color(claude.settings, self.colors.item)}')
-      print(f'Rerun with {self._color(" ".join(sys.argv[1:]), self.colors.item)} {self._color("--force", self.colors.shell)}')
+    if is_existing_claude and not overwrite_provider:
+      print(f'You ran {self._color("spackle build", self.colors.shell)}, but already have Claude configurations. spackle needs to own (i.e. have overwrite access) \n  - {self._color(claude.mcp_config, self.colors.item)}\n  - {self._color(claude.settings, self.colors.item)}')
+      print(f'Rerun with {self._color("spackle " + " ".join(sys.argv[1:]), self.colors.shell)} {self._color("--overwrite-provider", self.colors.add)}')
       exit()
 
 
@@ -300,21 +302,21 @@ class Spackle:
 
     # Overwrite configuration files if we're asked to
     # .spackle/spackle.*
-    self._copy_file(self.paths.user_md, install.user_md, force=force, log=True)
-    self._copy_file(self.paths.user_py, install.user_py, force=force, log=True)
+    self._copy_file(self.paths.user_md, install.user_md, force=False, log=True, flag='--overwrite-spackle')
+    self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
 
     # CLAUDE.md
-    self._copy_file(self.paths.claude_md, claude.claude_md, force=force, log=True)
+    self._copy_file(self.paths.claude_md, claude.claude_md, force=overwrite_provider, log=True, flag='--overwrite-provider')
 
     # .mcp.json
-    self._copy_file(self.paths.mcp_config, claude.mcp_config, force=force, log=True)
+    self._copy_file(self.paths.mcp_config, claude.mcp_config, force=overwrite_provider, log=True, flag='--overwrite-provider')
 
     # .claude/settings.local.json
     overwrite_settings = True
     if os.path.exists(claude.settings):
-      overwrite_settings = force
+      overwrite_settings = overwrite_provider
 
-    self._log_copy_action('generated file', claude.settings, overwrite_settings)
+    self._log_copy_action(claude.settings, force=overwrite_settings, flag='--overwrite-provider')
     if overwrite_settings:
       # .claude/settings/local.json
       settings = {
@@ -354,21 +356,25 @@ class Spackle:
   #############
   # UTILITIES #
   #############
-  def _log_copy_action(self, source, dest, force):
-    message = ''
+  def _log_copy_action(self, dest: str, force: bool, flag: str):
+    install = InstallPaths()
+
+    # Add a colored source and destination
+    message = self._color(pathlib.Path(dest).relative_to(pathlib.Path(install.root)), self.colors.item)
+
+
+    # Show whether --overwrite-provider was used
     if os.path.exists(dest):
       if force:
-        message = f'{message} ({self._color("--force", self.colors.shell)} specified; overwriting)'
+        message += f' ({self._color(flag, self.colors.shell)} specified; overwriting)'
       else:
-        message = f'{message} ({self._color("--force", self.colors.shell)} not specified; skipping)'
-
-    message = f'{message} {self._color(source, self.colors.item)} {self._color("->", self.colors.arrow)} {self._color(dest, self.colors.item)}'
+        message += f' ({self._color(flag, self.colors.shell)} not specified; skipping)'
 
     print(message)
 
-  def _copy_tree(self, source, dest, force=False, log=False):
+  def _copy_tree(self, source, dest, force: bool = False, log: bool = False, flag: str = None):
     if log:
-      self._log_copy_action(source, dest, force)
+      self._log_copy_action(dest, force, flag)
 
     if os.path.exists(dest):
       if force:
@@ -378,9 +384,9 @@ class Spackle:
 
     shutil.copytree(source, dest)
 
-  def _copy_file(self, source, dest, force=False, log=False):
+  def _copy_file(self, source, dest, force: bool = False, log: bool = False, flag: str = None):
     if log:
-      self._log_copy_action(source, dest, force)
+      self._log_copy_action(dest, force, flag)
 
     if os.path.exists(dest):
       if force:
@@ -390,7 +396,7 @@ class Spackle:
 
     shutil.copy2(source, dest)
 
-  def _copy_dir_file(self, source, dest, file_name, force=False, log=False):
+  def _copy_dir_file(self, source, dest, file_name: str, force: bool = False, log: bool = False, flag: str = None):
     self._copy_file(
       os.path.join(source, file_name), os.path.join(dest, file_name), force, log
     )
@@ -444,6 +450,29 @@ class Spackle:
 
   def _is_file_path_equal(self, a: str, b: str) -> bool:
     return self._canonicalize_path(a) == self._canonicalize_path(b)
+
+  def _remove_dir_except_files(self, dir_path, keep_files):
+    dir_path = pathlib.Path(dir_path)
+    
+    # Save files that exist
+    saved_files = {}
+    for filename in keep_files:
+        file_path = dir_path / filename
+        if file_path.exists():
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp_path = pathlib.Path(tmp.name)
+            shutil.copy2(file_path, tmp_path)  # preserves metadata
+            saved_files[filename] = tmp_path
+    
+    # Nuke the directory
+    shutil.rmtree(dir_path)
+    
+    # Restore saved files
+    if saved_files:
+        dir_path.mkdir(parents=True, exist_ok=True)
+        for filename, tmp_path in saved_files.items():
+            shutil.copy2(tmp_path, dir_path / filename)
+            tmp_path.unlink()
 
 
 spackle = Spackle()
@@ -591,7 +620,7 @@ class CLI:
   @staticmethod
   @click.command()
   @click.option(
-    '--force',
+    '--overwrite-provider',
     is_flag=True,
     help='Overwrite existing files with a clean copy from spackle',
   )
@@ -601,10 +630,10 @@ class CLI:
     default='claude',
     help='Provider to build for'
   )
-  def build(force, provider):
+  def build(overwrite_provider, provider):
     """Build configuration for provider and install spackle into ./spackle"""
     provider_enum = Provider(provider)
-    spackle.build(force=force, provider=provider_enum)
+    spackle.build(overwrite_provider=overwrite_provider, provider=provider_enum)
 
   @staticmethod
   @click.command()
