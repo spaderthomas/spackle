@@ -235,10 +235,14 @@ class Spackle:
     self._remove_dir_except_files(install.spackle, [install.user_md, install.user_py])
 
     shutil.rmtree(claude.claude, ignore_errors=True)
+    
+    # Clean CLAUDE.md non-destructively
     if os.path.exists(claude.claude_md):
-      os.remove(claude.claude_md)
+      self._clean_claude_md(claude.claude_md)
+    
+    # Clean .mcp.json non-destructively
     if os.path.exists(claude.mcp_config):
-      os.remove(claude.mcp_config)
+      self._clean_mcp_config(claude.mcp_config)
   
   def build(self, overwrite_provider: bool = False, provider: Provider = Provider.Claude) -> None:        
     match provider:
@@ -305,11 +309,11 @@ class Spackle:
     self._copy_file(self.paths.user_md, install.user_md, force=False, log=True, flag='--overwrite-spackle')
     self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
 
-    # CLAUDE.md
-    self._copy_file(self.paths.claude_md, claude.claude_md, force=overwrite_provider, log=True, flag='--overwrite-provider')
+    # CLAUDE.md - create or update non-destructively
+    self._update_claude_md(claude.claude_md, overwrite_provider)
 
-    # .mcp.json
-    self._copy_file(self.paths.mcp_config, claude.mcp_config, force=overwrite_provider, log=True, flag='--overwrite-provider')
+    # .mcp.json - create or update non-destructively
+    self._update_mcp_config(claude.mcp_config, overwrite_provider)
 
     # .claude/settings.local.json
     overwrite_settings = True
@@ -473,6 +477,129 @@ class Spackle:
         for filename, tmp_path in saved_files.items():
             shutil.copy2(tmp_path, dir_path / filename)
             tmp_path.unlink()
+
+  def _update_claude_md(self, claude_md_path: str, overwrite: bool) -> None:
+    """Update CLAUDE.md non-destructively by adding spackle reference if not present"""
+    self._log_copy_action(claude_md_path, force=overwrite, flag='--overwrite-provider')
+    
+    spackle_reference = "@.spackle/prompts/spackle.md"
+    
+    if os.path.exists(claude_md_path):
+      if overwrite:
+        # Overwrite mode - just create the file with our reference
+        with open(claude_md_path, 'w') as f:
+          f.write(f"{spackle_reference}\n")
+      else:
+        # Non-destructive mode - check if reference exists
+        with open(claude_md_path, 'r') as f:
+          lines = [line.rstrip('\n') for line in f]
+        
+        # Check if our reference already exists
+        reference_exists = any(spackle_reference in line for line in lines)
+        
+        if not reference_exists:
+          # Add our reference
+          lines.append(spackle_reference)
+          with open(claude_md_path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+    else:
+      # File doesn't exist - create it with our reference
+      with open(claude_md_path, 'w') as f:
+        f.write(f"{spackle_reference}\n")
+
+  def _update_mcp_config(self, mcp_config_path: str, overwrite: bool) -> None:
+    """Update .mcp.json non-destructively by adding spackle servers if not present"""
+    self._log_copy_action(mcp_config_path, force=overwrite, flag='--overwrite-provider')
+    
+    spackle_servers = {
+      "spackle-main": {
+        "command": "uv",
+        "args": ["run", "spackle", "serve", "main"]
+      },
+      "spackle-probe": {
+        "command": "uv",
+        "args": ["run", "spackle", "serve", "probe"]
+      },
+      "spackle-sqlite": {
+        "command": "uv",
+        "args": ["run", "spackle", "serve", "sqlite"]
+      }
+    }
+    
+    if os.path.exists(mcp_config_path):
+      if overwrite:
+        # Overwrite mode - create with just our servers
+        config = {"mcpServers": spackle_servers}
+        with open(mcp_config_path, 'w') as f:
+          json.dump(config, f, indent=2)
+      else:
+        # Non-destructive mode - merge servers
+        with open(mcp_config_path, 'r') as f:
+          try:
+            config = json.load(f)
+          except json.JSONDecodeError:
+            config = {}
+        
+        if "mcpServers" not in config:
+          config["mcpServers"] = {}
+        
+        # Add spackle servers if they don't exist
+        for server_name, server_config in spackle_servers.items():
+          if server_name not in config["mcpServers"]:
+            config["mcpServers"][server_name] = server_config
+        
+        with open(mcp_config_path, 'w') as f:
+          json.dump(config, f, indent=2)
+    else:
+      # File doesn't exist - create it with our servers
+      config = {"mcpServers": spackle_servers}
+      with open(mcp_config_path, 'w') as f:
+        json.dump(config, f, indent=2)
+
+  def _clean_claude_md(self, claude_md_path: str) -> None:
+    """Remove spackle reference from CLAUDE.md"""
+    spackle_reference = "@.spackle/prompts/spackle.md"
+    
+    with open(claude_md_path, 'r') as f:
+      lines = [line.rstrip('\n') for line in f]
+    
+    # Remove lines containing our reference
+    cleaned_lines = [line for line in lines if spackle_reference not in line]
+    
+    if len(cleaned_lines) != len(lines):
+      # Only rewrite if we removed something
+      if cleaned_lines:
+        with open(claude_md_path, 'w') as f:
+          f.write('\n'.join(cleaned_lines) + '\n')
+      else:
+        # File would be empty, remove it
+        os.remove(claude_md_path)
+
+  def _clean_mcp_config(self, mcp_config_path: str) -> None:
+    """Remove spackle servers from .mcp.json"""
+    spackle_server_names = ["spackle-main", "spackle-probe", "spackle-sqlite"]
+    
+    with open(mcp_config_path, 'r') as f:
+      try:
+        config = json.load(f)
+      except json.JSONDecodeError:
+        return
+    
+    if "mcpServers" in config:
+      # Remove spackle servers
+      for server_name in spackle_server_names:
+        config["mcpServers"].pop(server_name, None)
+      
+      # If mcpServers is now empty, remove it
+      if not config["mcpServers"]:
+        del config["mcpServers"]
+    
+    # If config is now empty, remove the file
+    if not config:
+      os.remove(mcp_config_path)
+    else:
+      with open(mcp_config_path, 'w') as f:
+        json.dump(config, f, indent=2)
 
 
 spackle = Spackle()
