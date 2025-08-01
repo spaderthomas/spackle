@@ -77,7 +77,7 @@ def probe_server():
     @mcp.tool()
     def search_code(
         query: str,
-        subpath: str = None,
+        subpath: str = "",
         session: str = "new"
     ) -> str:
         """Search code in the repository using ElasticSearch. Use this tool first for any code-related questions.
@@ -149,14 +149,10 @@ def probe_server():
     
     @mcp.tool()
     def extract_code(
-        files: List[str],
-        contextLines: int = 0
+        files: List[str]
     ) -> str:
-        """Extract code blocks from files based on line number, or symbol name. Fetch full file when line number is not provided.
-        
-        Args:
-            files: Files and lines or symbols to extract from
-            contextLines: Number of context lines to include
+        """
+        Extract code blocks from a list of relative file paths of the form {file}:{line}. The file path is specified from the root directory of the project. For example, if line 69 of foo.py is within a function bar, this tool will return the full text for bar().
         """
         
         # Build the probe extract command
@@ -167,10 +163,6 @@ def probe_server():
         
         # Hardcoded format
         cmd.extend(["--format", "markdown"])
-        
-        # Add context lines if specified
-        if contextLines > 0:
-            cmd.extend(["--context", str(contextLines)])
         
         return run_probe_command(cmd)
     

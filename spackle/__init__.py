@@ -554,16 +554,16 @@ class Spackle:
     
     spackle_servers = {
       "spackle-main": {
-        "command": "uv",
-        "args": ["run", "spackle", "serve", "main"]
+        "command": "spackle",
+        "args": ["serve", "main"]
       },
       "spackle-probe": {
-        "command": "uv",
-        "args": ["run", "spackle", "serve", "probe"]
+        "command": "spackle",
+        "args": ["serve", "probe"]
       },
       "spackle-sqlite": {
-        "command": "uv",
-        "args": ["run", "spackle", "serve", "sqlite"]
+        "command": "spackle",
+        "args": ["serve", "sqlite"]
       }
     }
     
