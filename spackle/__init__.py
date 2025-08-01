@@ -57,22 +57,52 @@ class SpacklePaths:
 
 class InstallPaths:
   def __init__(self):
-    self.root: str = os.getcwd()
+    self.root: str = self._find_project_root()
     self.spackle: str = os.path.join(self.root, '.spackle')
     self.output = os.path.join(self.spackle, 'output')
     self.prompts: str = os.path.join(self.spackle, 'prompts')
     self.user_md: str = os.path.join(self.spackle, 'spackle.md')
     self.user_py: str = os.path.join(self.spackle, 'spackle.py')
 
+  def _find_project_root(self) -> str:
+    """Find project root by looking up from cwd until finding spackle.py, then go up from .spackle"""
+    current_dir = os.getcwd()
+    
+    while current_dir != os.path.dirname(current_dir):  # Stop at filesystem root
+      spackle_py_path = os.path.join(current_dir, '.spackle', 'spackle.py')
+      if os.path.exists(spackle_py_path):
+        spackle_dir = os.path.join(current_dir, '.spackle')
+        assert os.path.exists(spackle_dir), f"Expected .spackle directory at {spackle_dir}"
+        return current_dir
+      current_dir = os.path.dirname(current_dir)
+    
+    # If we can't find spackle.py, fall back to current working directory
+    return os.getcwd()
+
 
 class ClaudePaths:
   def __init__(self):
-    self.root: str = os.getcwd()
+    self.root: str = self._find_project_root()
     self.claude_md: str = os.path.join(self.root, 'CLAUDE.md')
     self.mcp_config: str = os.path.join(self.root, '.mcp.json')
     self.claude: str = os.path.join(self.root, '.claude')
     self.settings: str = os.path.join(self.claude, 'settings.local.json')
     self.commands: str = os.path.join(self.claude, 'commands')
+
+  def _find_project_root(self) -> str:
+    """Find project root by looking up from cwd until finding spackle.py, then go up from .spackle"""
+    current_dir = os.getcwd()
+    
+    while current_dir != os.path.dirname(current_dir):  # Stop at filesystem root
+      spackle_py_path = os.path.join(current_dir, '.spackle', 'spackle.py')
+      if os.path.exists(spackle_py_path):
+        spackle_dir = os.path.join(current_dir, '.spackle')
+        assert os.path.exists(spackle_dir), f"Expected .spackle directory at {spackle_dir}"
+        return current_dir
+      current_dir = os.path.dirname(current_dir)
+    
+    # If we can't find spackle.py, fall back to current working directory
+    return os.getcwd()
 
 
 #######
@@ -89,6 +119,16 @@ class McpResult(pydantic.BaseModel):
   response: str
   stderr: str
   stdout: str
+
+  @staticmethod
+  def Ok(response: str):
+    return McpResult(
+      return_code = 0,
+      response = response,
+      stderr = '',
+      stdout = ''
+    )
+
 
 
 #########
@@ -332,6 +372,7 @@ class Spackle:
   def run_server(self, name: str) -> None:
     self._load_user_file()
 
+    print(name, file = sys.stderr)
     if name not in self.mcp_registry:
       raise ValueError(f'MCP with name {name} was not registered with spackle')
     
@@ -409,7 +450,7 @@ class Spackle:
     for hook in self.hooks.values():
       entry = self._ensure_hook(hooks, hook)
       entry['hooks'].append(
-        {'type': 'command', 'command': f'uv run spackle hook {hook.name}'}
+        {'type': 'command', 'command': f'spackle hook {hook.name}'}
       )
 
     return hooks
@@ -520,12 +561,8 @@ class SpackleMcps:
   @staticmethod
   @spackle.mcp(name='probe')
   def probe():
-    env = os.environ.copy()
-    # This shit is broken in Probe https://github.com/buger/probe/blob/main/mcp/src/index.ts#L132
-    # env['PROBE_DEFAULT_PATHS'] = spackle.install.root
-    # env['PROBE_MAX_TOKENS'] = '100'
-
-    subprocess.run(['npx', '-y', '@buger/probe-mcp'], env=env, check=True)
+    from .probe import probe_server
+    probe_server()
 
 
 from .sqlite import sqlite_server
@@ -547,7 +584,7 @@ def spackle__refresh_rules():
   return spackle.paths.prompts + '/rules.md'
 
 @spackle.prompt_file
-def spakle__sketch():
+def spackle__sketch():
   return spackle.paths.prompts + '/sketch.md'
 
 
@@ -595,6 +632,7 @@ def test() -> McpResult:
   tools=[HookTool.Edit, HookTool.MultiEdit, HookTool.Write],
 )
 def ensure_spackle_templates_are_read_only(context: HookContext):
+  context.allow()
   install = InstallPaths()
   file_path = context.request['tool_input']['file_path']
   file_path = spackle._canonicalize_path(file_path)
@@ -646,8 +684,7 @@ class CLI:
   @click.argument('name')
   def tool(name):
     """Run a tool defined in the main spackle MCP with @spackle.tool"""
-    result = spackle.run_tool(name)
-    print(result.response)
+    spackle.run_tool(name)
 
   @staticmethod
   @click.command()

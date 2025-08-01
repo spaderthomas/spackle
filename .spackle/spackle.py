@@ -26,3 +26,9 @@ def test() -> spackle.McpResult:
     stdout = '',
     response = 'There is nothing to test in this project'
   )
+
+@spackle.tool
+def foo(bar: str = None) -> spackle.McpResult:
+  import sys
+  print(bar, file = sys.stderr)
+  return spackle.McpResult(return_code = 0, stderr = '', stdout = '', response = bar)
