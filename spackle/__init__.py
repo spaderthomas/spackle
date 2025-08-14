@@ -284,16 +284,14 @@ class Spackle:
     if os.path.exists(claude.mcp_config):
       self._clean_mcp_config(claude.mcp_config)
 
-  def build(
-    self, overwrite_provider: bool = False, provider: Provider = Provider.Claude
-  ) -> None:
+  def build(self, provider: Provider = Provider.Claude) -> None:
     match provider:
       case Provider.Claude:
-        self._build_claude(overwrite_provider)
+        self._build_claude()
       case _:
         raise ValueError(f'Unsupported provider: {provider}')
 
-  def _build_claude(self, overwrite_provider: bool) -> None:
+  def _build_claude(self) -> None:
     claude = ClaudePaths()
     install = InstallPaths()
 
@@ -340,13 +338,13 @@ class Spackle:
     self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
 
     # CLAUDE.md - create or update non-destructively
-    self._update_claude_md(claude.claude_md, overwrite_provider)
+    self._update_claude_md(claude.claude_md)
 
     # .mcp.json - create or update non-destructively
-    self._update_mcp_config(claude.mcp_config, overwrite_provider)
+    self._update_mcp_config(claude.mcp_config)
 
     # .claude/settings.local.json - always update settings
-    self._log_copy_action(claude.settings, force=True, flag='--overwrite-provider')
+    self._log_copy_action(claude.settings, force=True, flag='(always overwritten)')
     settings = {
       'permissions': profiles['permissive'],
       'enabledMcpjsonServers': ['spackle-main', 'spackle-probe'],
@@ -393,10 +391,10 @@ class Spackle:
       pathlib.Path(dest).relative_to(pathlib.Path(install.root)), self.colors.item
     )
 
-    # Show whether --overwrite-provider was used
+    # Show whether overwrite was used
     if os.path.exists(dest):
       if force:
-        message += f' ({self._color(flag, self.colors.shell)} specified; overwriting)'
+        message += f' ({self._color(flag, self.colors.shell)}; overwriting)'
       else:
         message += f' ({self._color(flag, self.colors.shell)} not specified; skipping)'
 
@@ -514,38 +512,33 @@ class Spackle:
         shutil.copy2(tmp_path, dir_path / filename)
         tmp_path.unlink()
 
-  def _update_claude_md(self, claude_md_path: str, overwrite: bool) -> None:
+  def _update_claude_md(self, claude_md_path: str) -> None:
     """Update CLAUDE.md non-destructively by adding spackle reference if not present"""
-    self._log_copy_action(claude_md_path, force=overwrite, flag='--overwrite-provider')
+    self._log_copy_action(claude_md_path, force=False, flag='(non-destructive update)')
 
     spackle_reference = '@.spackle/prompts/spackle.md'
 
     if os.path.exists(claude_md_path):
-      if overwrite:
-        # Overwrite mode - just create the file with our reference
+      # Non-destructive mode - check if reference exists
+      with open(claude_md_path, 'r') as f:
+        lines = [line.rstrip('\n') for line in f]
+
+      # Check if our reference already exists
+      reference_exists = any(spackle_reference in line for line in lines)
+
+      if not reference_exists:
+        # Add our reference
+        lines.append(spackle_reference)
         with open(claude_md_path, 'w') as f:
-          f.write(f'{spackle_reference}\n')
-      else:
-        # Non-destructive mode - check if reference exists
-        with open(claude_md_path, 'r') as f:
-          lines = [line.rstrip('\n') for line in f]
-
-        # Check if our reference already exists
-        reference_exists = any(spackle_reference in line for line in lines)
-
-        if not reference_exists:
-          # Add our reference
-          lines.append(spackle_reference)
-          with open(claude_md_path, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
+          f.write('\n'.join(lines) + '\n')
     else:
       # File doesn't exist - create it with our reference
       with open(claude_md_path, 'w') as f:
         f.write(f'{spackle_reference}\n')
 
-  def _update_mcp_config(self, mcp_config_path: str, overwrite: bool) -> None:
+  def _update_mcp_config(self, mcp_config_path: str) -> None:
     """Update .mcp.json non-destructively by adding spackle servers if not present"""
-    self._log_copy_action(mcp_config_path, force=overwrite, flag='--overwrite-provider')
+    self._log_copy_action(mcp_config_path, force=False, flag='(non-destructive update)')
     
     spackle_servers = {
       "spackle-main": {
@@ -573,12 +566,7 @@ class Spackle:
       if "mcpServers" not in config:
         config["mcpServers"] = {}
       
-      # Remove any existing spackle servers first to avoid stale entries
-      spackle_server_names = list(spackle_servers.keys())
-      for server_name in spackle_server_names:
-        config["mcpServers"].pop(server_name, None)
-      
-      # Add spackle servers
+      # Add spackle servers (don't remove existing ones)
       for server_name, server_config in spackle_servers.items():
         config["mcpServers"][server_name] = server_config
       
@@ -789,8 +777,7 @@ class CLI:
   def build(provider):
     """Build configuration for provider and install spackle into ./spackle"""
     provider_enum = Provider(provider)
-    # Always merge with existing files instead of overwriting
-    spackle.build(overwrite_provider=False, provider=provider_enum)
+    spackle.build(provider=provider_enum)
 
   @staticmethod
   @click.command()
