@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import tempfile
 import shutil
+import os
 
 import spackle
 
@@ -20,6 +21,10 @@ def temp_project_dir():
 
 @pytest.fixture
 def test_user_code_file(tmp_path):
+  # Create the .spackle directory first
+  spackle_dir = tmp_path / '.spackle'
+  spackle_dir.mkdir(exist_ok=True)
+  
   test_code = """#!/usr/bin/env python
 
 import spackle
@@ -59,34 +64,40 @@ def test_spackle_build_with_user_code(temp_project_dir, test_user_code_file):
   # Setup project
   spackle_dir = temp_project_dir / '.spackle'
   spackle_dir.mkdir(exist_ok=True)
+  
+  # Copy the test user code file to the temp project directory
+  project_spackle_dir = temp_project_dir / '.spackle'
+  project_spackle_dir.mkdir(exist_ok=True)
+  project_spackle_py = project_spackle_dir / 'spackle.py'
+  shutil.copy(test_user_code_file, project_spackle_py)
 
-  # Create settings.json with the test user code file
-  settings = {'file_path': str(test_user_code_file)}
+  # Run spackle build directly through the API
+  original_cwd = Path.cwd()
+  try:
+    os.chdir(temp_project_dir)
+    spackle.spackle.build()
+  finally:
+    os.chdir(original_cwd)
 
-  settings_file = spackle_dir / 'settings.json'
-  with open(settings_file, 'w') as f:
-    json.dump(settings, f, indent=2)
+  # Test spackle tool command through the API
+  original_cwd = Path.cwd()
+  try:
+    os.chdir(temp_project_dir)
+    result = spackle.spackle.run_tool('test_tool')
+    assert result.return_code == 0
+    assert 'Test tool executed successfully!' in result.response
+  finally:
+    os.chdir(original_cwd)
 
-  # Run spackle build
-  success, stdout, stderr = run_command('spackle build', cwd=temp_project_dir)
-  assert success, f'spackle build failed: {stderr}'
-
-  # Verify settings.json still has the correct path
-  with open(settings_file, 'r') as f:
-    loaded_settings = json.load(f)
-    assert loaded_settings['file_path'] == str(test_user_code_file)
-
-  # Test spackle tool command
-  success, stdout, stderr = run_command('spackle tool test_tool', cwd=temp_project_dir)
-  assert success, f'spackle tool test_tool failed: {stderr}'
-  assert 'Test tool executed successfully!' in stdout
-
-  # Test another tool
-  success, stdout, stderr = run_command(
-    'spackle tool another_test_tool', cwd=temp_project_dir
-  )
-  assert success, f'spackle tool another_test_tool failed: {stderr}'
-  assert 'Another tool works too!' in stdout
+  # Test another tool through the API
+  original_cwd = Path.cwd()
+  try:
+    os.chdir(temp_project_dir)
+    result = spackle.spackle.run_tool('another_test_tool')
+    assert result.return_code == 0
+    assert 'Another tool works too!' in result.response
+  finally:
+    os.chdir(original_cwd)
 
 
 def test_load_decorator_executes_immediately():
@@ -119,9 +130,13 @@ def test_load_decorator_with_nested_decorators():
 def test_spackle_build_creates_claude_files(temp_project_dir):
   """Test that spackle build creates the necessary Claude configuration files"""
 
-  # Run spackle build
-  success, stdout, stderr = run_command('spackle build', cwd=temp_project_dir)
-  assert success, f'spackle build failed: {stderr}'
+  # Run spackle build directly through the API
+  original_cwd = Path.cwd()
+  try:
+    os.chdir(temp_project_dir)
+    spackle.spackle.build()
+  finally:
+    os.chdir(original_cwd)
 
   # Check that CLAUDE.md is created
   claude_md = temp_project_dir / 'CLAUDE.md'

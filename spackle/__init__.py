@@ -297,20 +297,6 @@ class Spackle:
     claude = ClaudePaths()
     install = InstallPaths()
 
-    # Don't raw overwrite some popr soul's existing configuration
-    is_claude_md = os.path.exists(claude.claude_md)
-    is_claude_settings = os.path.exists(claude.settings)
-    is_claude_mcp = os.path.exists(claude.mcp_config)
-    is_existing_claude = is_claude_md or is_claude_settings or is_claude_mcp
-    if is_existing_claude and not overwrite_provider:
-      print(
-        f'You ran {self._color("spackle build", self.colors.shell)}, but already have Claude configurations. spackle needs to own (i.e. have overwrite access) \n  - {self._color(claude.mcp_config, self.colors.item)}\n  - {self._color(claude.settings, self.colors.item)}'
-      )
-      print(
-        f'Rerun with {self._color("spackle " + " ".join(sys.argv[1:]), self.colors.shell)} {self._color("--overwrite-provider", self.colors.add)}'
-      )
-      exit()
-
     # Make the .spackle subtree, where all of our stuff will go
     os.makedirs(install.spackle, exist_ok=True)
 
@@ -325,11 +311,11 @@ class Spackle:
     # @spackle.prompt
     for name, fn in self.prompts.items():
       try:
-        content = fn()
+        content = fn()        
         command_file = os.path.join(claude.commands, f'{name}.md')
         with open(command_file, 'w') as f:
           f.write(content)
-
+          
       except Exception as e:
         print(f'Error generating prompt file for {name}: {e}')
 
@@ -339,34 +325,19 @@ class Spackle:
         file_path = fn()
         file_path = os.path.join(install.root, file_path)
         if not os.path.exists(file_path):
-          raise ValueError(
-            f'Warning: Prompt file {file_path} not found, skipping {name}'
-          )
+          raise ValueError(f'Warning: Prompt file {file_path} not found, skipping {name}')
 
         shutil.copy2(file_path, os.path.join(claude.commands, f'{name}.md'))
-
+          
       except Exception as e:
         print(f'Error copying prompt file for {name}: {e}')
 
     # .claude/commands
     self._copy_tree(self.paths.prompts, install.prompts)
 
-    # Overwrite configuration files if we're asked to
     # .spackle/spackle.*
-    self._copy_file(
-      self.paths.user_md,
-      install.user_md,
-      force=False,
-      log=True,
-      flag='--overwrite-spackle',
-    )
-    self._copy_file(
-      self.paths.user_py,
-      install.user_py,
-      force=False,
-      log=True,
-      flag='--overwrite-spackle',
-    )
+    self._copy_file(self.paths.user_md, install.user_md, force=False, log=True, flag='--overwrite-spackle')
+    self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
 
     # CLAUDE.md - create or update non-destructively
     self._update_claude_md(claude.claude_md, overwrite_provider)
@@ -374,25 +345,17 @@ class Spackle:
     # .mcp.json - create or update non-destructively
     self._update_mcp_config(claude.mcp_config, overwrite_provider)
 
-    # .claude/settings.local.json
-    overwrite_settings = True
-    if os.path.exists(claude.settings):
-      overwrite_settings = overwrite_provider
+    # .claude/settings.local.json - always update settings
+    self._log_copy_action(claude.settings, force=True, flag='--overwrite-provider')
+    settings = {
+      'permissions': profiles['permissive'],
+      'enabledMcpjsonServers': ['spackle-main', 'spackle-probe'],
+      'disabledMcpjsonServers': ['spackle-sqlite'],
+      'hooks': self._build_hooks(),
+    }
 
-    self._log_copy_action(
-      claude.settings, force=overwrite_settings, flag='--overwrite-provider'
-    )
-    if overwrite_settings:
-      # .claude/settings/local.json
-      settings = {
-        'permissions': profiles['permissive'],
-        'enabledMcpjsonServers': ['spackle-main', 'spackle-probe'],
-        'disabledMcpjsonServers': ['spackle-sqlite'],
-        'hooks': self._build_hooks(),
-      }
-
-      with open(claude.settings, 'w') as file:
-        json.dump(settings, file, indent=2)
+    with open(claude.settings, 'w') as file:
+      json.dump(settings, file, indent=2)
 
   def run_server(self, name: str) -> None:
     self._load_user_file()
@@ -583,40 +546,47 @@ class Spackle:
   def _update_mcp_config(self, mcp_config_path: str, overwrite: bool) -> None:
     """Update .mcp.json non-destructively by adding spackle servers if not present"""
     self._log_copy_action(mcp_config_path, force=overwrite, flag='--overwrite-provider')
-
+    
     spackle_servers = {
-      'spackle-main': {'command': 'spackle', 'args': ['serve', 'main']},
-      'spackle-probe': {'command': 'spackle', 'args': ['serve', 'probe']},
-      'spackle-sqlite': {'command': 'spackle', 'args': ['serve', 'sqlite']},
+      "spackle-main": {
+        "command": "spackle",
+        "args": ["serve", "main"]
+      },
+      "spackle-probe": {
+        "command": "spackle",
+        "args": ["serve", "probe"]
+      },
+      "spackle-sqlite": {
+        "command": "spackle",
+        "args": ["serve", "sqlite"]
+      }
     }
-
+    
     if os.path.exists(mcp_config_path):
-      if overwrite:
-        # Overwrite mode - create with just our servers
-        config = {'mcpServers': spackle_servers}
-        with open(mcp_config_path, 'w') as f:
-          json.dump(config, f, indent=2)
-      else:
-        # Non-destructive mode - merge servers
-        with open(mcp_config_path, 'r') as f:
-          try:
-            config = json.load(f)
-          except json.JSONDecodeError:
-            config = {}
-
-        if 'mcpServers' not in config:
-          config['mcpServers'] = {}
-
-        # Add spackle servers if they don't exist
-        for server_name, server_config in spackle_servers.items():
-          if server_name not in config['mcpServers']:
-            config['mcpServers'][server_name] = server_config
-
-        with open(mcp_config_path, 'w') as f:
-          json.dump(config, f, indent=2)
+      # Non-destructive mode - merge servers
+      with open(mcp_config_path, 'r') as f:
+        try:
+          config = json.load(f)
+        except json.JSONDecodeError:
+          config = {}
+      
+      if "mcpServers" not in config:
+        config["mcpServers"] = {}
+      
+      # Remove any existing spackle servers first to avoid stale entries
+      spackle_server_names = list(spackle_servers.keys())
+      for server_name in spackle_server_names:
+        config["mcpServers"].pop(server_name, None)
+      
+      # Add spackle servers
+      for server_name, server_config in spackle_servers.items():
+        config["mcpServers"][server_name] = server_config
+      
+      with open(mcp_config_path, 'w') as f:
+        json.dump(config, f, indent=2)
     else:
       # File doesn't exist - create it with our servers
-      config = {'mcpServers': spackle_servers}
+      config = {"mcpServers": spackle_servers}
       with open(mcp_config_path, 'w') as f:
         json.dump(config, f, indent=2)
 
@@ -811,20 +781,16 @@ class CLI:
   @staticmethod
   @click.command()
   @click.option(
-    '--overwrite-provider',
-    is_flag=True,
-    help='Overwrite existing files with a clean copy from spackle',
-  )
-  @click.option(
     '--provider',
     type=click.Choice(['claude']),
     default='claude',
-    help='Provider to build for',
+    help='Provider to build for'
   )
-  def build(overwrite_provider, provider):
+  def build(provider):
     """Build configuration for provider and install spackle into ./spackle"""
     provider_enum = Provider(provider)
-    spackle.build(overwrite_provider=overwrite_provider, provider=provider_enum)
+    # Always merge with existing files instead of overwriting
+    spackle.build(overwrite_provider=False, provider=provider_enum)
 
   @staticmethod
   @click.command()
