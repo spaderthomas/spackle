@@ -444,7 +444,6 @@ def fetch_jira_xml_from_url(url: str, timeout: int = 10) -> str:
     # 'parent',
     # 'subtasks',
     # 'issuelinks'
-
     'key',
     'summary',
     'description',

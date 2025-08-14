@@ -116,74 +116,80 @@ def test_load_decorator_with_nested_decorators():
   assert len(tools_defined) == 1, 'Tool should be defined inside @load function'
 
 
-
 def test_spackle_build_creates_claude_files(temp_project_dir):
   """Test that spackle build creates the necessary Claude configuration files"""
-  
+
   # Run spackle build
   success, stdout, stderr = run_command('spackle build', cwd=temp_project_dir)
   assert success, f'spackle build failed: {stderr}'
-  
+
   # Check that CLAUDE.md is created
   claude_md = temp_project_dir / 'CLAUDE.md'
   assert claude_md.exists(), 'CLAUDE.md should be created by spackle build'
-  
+
   # Check that .claude directory and settings.local.json are created
   claude_dir = temp_project_dir / '.claude'
   assert claude_dir.exists(), '.claude directory should be created by spackle build'
-  
+
   settings_file = claude_dir / 'settings.local.json'
-  assert settings_file.exists(), '.claude/settings.local.json should be created by spackle build'
-  
+  assert settings_file.exists(), (
+    '.claude/settings.local.json should be created by spackle build'
+  )
+
   # Verify the settings file contains expected structure
   with open(settings_file, 'r') as f:
     settings = json.load(f)
     assert 'permissions' in settings, 'settings should contain permissions'
-    assert 'enabledMcpjsonServers' in settings, 'settings should contain enabledMcpjsonServers'
-    assert 'spackle-main' in settings['enabledMcpjsonServers'], 'spackle-main should be enabled'
-    assert 'spackle-probe' in settings['enabledMcpjsonServers'], 'spackle-probe should be enabled'
-  
-  # Check that .mcp.json is created  
+    assert 'enabledMcpjsonServers' in settings, (
+      'settings should contain enabledMcpjsonServers'
+    )
+    assert 'spackle-main' in settings['enabledMcpjsonServers'], (
+      'spackle-main should be enabled'
+    )
+    assert 'spackle-probe' in settings['enabledMcpjsonServers'], (
+      'spackle-probe should be enabled'
+    )
+
+  # Check that .mcp.json is created
   mcp_config = temp_project_dir / '.mcp.json'
   assert mcp_config.exists(), '.mcp.json should be created by spackle build'
-
 
 
 def test_prompt_decorator_without_build():
   """Test that the prompt decorator stores functions correctly"""
   import spackle
-  
+
   # Clear any existing prompts
   spackle.spackle.prompts.clear()
-  
+
   @spackle.prompt
   def test_command():
-    return "This is a test prompt."
-  
+    return 'This is a test prompt.'
+
   # Verify the function was stored
   assert 'test_command' in spackle.spackle.prompts
   assert spackle.spackle.prompts['test_command'] == test_command
-  
+
   # Verify calling the function returns the expected string
   result = spackle.spackle.prompts['test_command']()
-  assert result == "This is a test prompt."
+  assert result == 'This is a test prompt.'
 
 
 def test_prompt_file_decorator_without_build():
   """Test that the prompt_file decorator stores file paths correctly"""
   import spackle
-  
+
   # Clear any existing prompt files
   spackle.spackle.prompt_files.clear()
-  
+
   @spackle.prompt_file
   def test_file_command():
     return 'test/path.md'
-  
+
   # Verify the function was stored
   assert 'test_file_command' in spackle.spackle.prompt_files
   assert spackle.spackle.prompt_files['test_file_command'] == test_file_command
-  
+
   # Verify calling the function returns the expected filename
   result = spackle.spackle.prompt_files['test_file_command']()
   assert result == 'test/path.md'
