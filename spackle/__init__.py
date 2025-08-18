@@ -29,6 +29,7 @@ class Provider(enum.Enum):
 
 
 from .jira import parse_jira_to_markdown, fetch_jira_xml_from_url
+from .repo import RepoConfig
 
 from abc import abstractmethod
 from collections import OrderedDict
@@ -146,7 +147,6 @@ class HookTool(enum.Enum):
   WebFetch = 'WebFetch'
   WebSearch = 'WebSearch'
 
-
 class HookEvent(enum.Enum):
   PreToolUse = 'PreToolUse'
   PostToolUse = 'PostToolUse'
@@ -199,6 +199,24 @@ class HookContext:
 
     sys.exit(2)
 
+  def allow_with_prompt(self, relative_path: str):
+    with open(os.path.join(spackle.install.prompts, relative_path), 'r') as file:
+      self.allow(file.read())
+
+  def deny_blacklist(self, blacklist: List[str], message: Optional[str]):
+    program  = self.request['tool_input']['command'].split(' ')[0]
+    if program in blacklist:
+      self.deny(message)
+
+    self.allow()
+
+
+##########
+# CONFIG #
+##########
+class Config:
+  def __init__(self, blacklist: List[str] = []):
+    self.blacklist = blacklist
 
 ###########
 # SPACKLE #
@@ -225,6 +243,11 @@ class Spackle:
     self.hooks = {}
     self.prompts = {}
     self.prompt_files = {}
+    self.blacklist = []
+
+  def configure(self, config: Config):
+    self.blacklist = config.blacklist
+    print(self.blacklist)
 
   ##############
   # DECORATORS #
@@ -302,6 +325,16 @@ class Spackle:
     os.makedirs(claude.claude, exist_ok=True)
     os.makedirs(claude.commands, exist_ok=True)
 
+    # .claude/commands
+    self._copy_tree(self.paths.prompts, install.prompts)
+
+    # .spackle/spackle.*
+    self._copy_file(self.paths.user_md, install.user_md, force=False, log=True, flag='--overwrite-spackle')
+    self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
+
+    # Create vendor symlinks for managed repositories
+    self._create_vendor_symlinks(install)
+
     # Run the user's Python file
     if os.path.exists(install.user_py):
       self._load_user_file()
@@ -309,11 +342,11 @@ class Spackle:
     # @spackle.prompt
     for name, fn in self.prompts.items():
       try:
-        content = fn()        
+        content = fn()
         command_file = os.path.join(claude.commands, f'{name}.md')
         with open(command_file, 'w') as f:
           f.write(content)
-          
+
       except Exception as e:
         print(f'Error generating prompt file for {name}: {e}')
 
@@ -326,16 +359,9 @@ class Spackle:
           raise ValueError(f'Warning: Prompt file {file_path} not found, skipping {name}')
 
         shutil.copy2(file_path, os.path.join(claude.commands, f'{name}.md'))
-          
+
       except Exception as e:
         print(f'Error copying prompt file for {name}: {e}')
-
-    # .claude/commands
-    self._copy_tree(self.paths.prompts, install.prompts)
-
-    # .spackle/spackle.*
-    self._copy_file(self.paths.user_md, install.user_md, force=False, log=True, flag='--overwrite-spackle')
-    self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
 
     # CLAUDE.md - create or update non-destructively
     self._update_claude_md(claude.claude_md)
@@ -512,6 +538,29 @@ class Spackle:
         shutil.copy2(tmp_path, dir_path / filename)
         tmp_path.unlink()
 
+  def _create_vendor_symlinks(self, install: InstallPaths) -> None:
+    """Create symlink to cached repositories in .spackle/repos/"""
+    repos_symlink = os.path.join(install.spackle, 'repos')
+
+    # Load repository config
+    repo_config = RepoConfig()
+    repositories = repo_config.list_repositories()
+
+    if not repositories:
+      return
+
+    # Remove existing repos symlink if it exists
+    if os.path.exists(repos_symlink) or os.path.islink(repos_symlink):
+      if os.path.islink(repos_symlink):
+        os.unlink(repos_symlink)
+      else:
+        # It's a real directory, not a symlink - remove it
+        shutil.rmtree(repos_symlink)
+
+    # Create symlink to the entire cache directory
+    os.symlink(repo_config.cache_dir, repos_symlink)
+    print(f"Created repos symlink: {self._color('repos/', self.colors.item)} -> {repo_config.cache_dir}")
+
   def _update_claude_md(self, claude_md_path: str) -> None:
     """Update CLAUDE.md non-destructively by adding spackle reference if not present"""
     self._log_copy_action(claude_md_path, force=False, flag='(non-destructive update)')
@@ -539,7 +588,7 @@ class Spackle:
   def _update_mcp_config(self, mcp_config_path: str) -> None:
     """Update .mcp.json non-destructively by adding spackle servers if not present"""
     self._log_copy_action(mcp_config_path, force=False, flag='(non-destructive update)')
-    
+
     spackle_servers = {
       "spackle-main": {
         "command": "spackle",
@@ -554,7 +603,7 @@ class Spackle:
         "args": ["serve", "sqlite"]
       }
     }
-    
+
     if os.path.exists(mcp_config_path):
       # Non-destructive mode - merge servers
       with open(mcp_config_path, 'r') as f:
@@ -562,14 +611,14 @@ class Spackle:
           config = json.load(f)
         except json.JSONDecodeError:
           config = {}
-      
+
       if "mcpServers" not in config:
         config["mcpServers"] = {}
-      
+
       # Add spackle servers (don't remove existing ones)
       for server_name, server_config in spackle_servers.items():
         config["mcpServers"][server_name] = server_config
-      
+
       with open(mcp_config_path, 'w') as f:
         json.dump(config, f, indent=2)
     else:
@@ -649,6 +698,7 @@ load = spackle.load
 prompt = spackle.prompt
 prompt_file = spackle.prompt_file
 wrap_subprocess = spackle.wrap_subprocess
+configure = spackle.configure
 
 
 #################
@@ -680,23 +730,44 @@ from .sqlite import sqlite_server
 # BUILT IN PROMPTS #
 ####################
 @spackle.prompt_file
-def spackle__refresh():
-  return spackle.paths.prompts + '/spackle.md'
+def sp_refresh_instructions():
+  return spackle.install.prompts + '/refresh-instructions.md'
 
 
 @spackle.prompt_file
-def spackle__refresh_user():
-  return spackle.paths.prompts + '/refresh-user-instructions.md'
-
-
-@spackle.prompt_file
-def spackle__refresh_rules():
-  return spackle.paths.prompts + '/rules.md'
-
+def sp_refresh_user_instructions():
+  return spackle.install.prompts + '/refresh-user-instructions.md'
 
 @spackle.prompt_file
 def spackle__sketch():
   return spackle.paths.prompts + '/sketch.md'
+
+
+##################
+# BUILT IN HOOKS #
+##################
+@spackle.hook(
+  event = HookEvent.PreToolUse,
+  tools = [HookTool.Edit, HookTool.MultiEdit, HookTool.Write]
+)
+def sp_refresh_write(context: HookContext):
+  context.allow_with_prompt('refresh-write.md')
+
+@spackle.hook(
+  event = HookEvent.Stop
+)
+def sp_ensure_build_passes(context: HookContext):
+  context.allow_with_prompt('ensure-build-passes.md')
+
+@spackle.hook(
+  event = HookEvent.PreToolUse,
+  tools = [HookTool.Bash]
+)
+def sp_ensure_correct_build(context: HookContext):
+  if spackle.blacklist:
+    context.deny_blacklist(spackle.blacklist, 'use the spackle mcp goddamnit')
+  context.allow()
+
 
 
 ##################
@@ -733,34 +804,6 @@ def test() -> McpResult:
     stderr='',
     stdout='',
   )
-
-
-##################
-# BUILT IN HOOKS #
-##################
-@spackle.hook(
-  event=HookEvent.PreToolUse,
-  tools=[HookTool.Edit, HookTool.MultiEdit, HookTool.Write],
-)
-def ensure_spackle_templates_are_read_only(context: HookContext):
-  context.allow()
-  install = InstallPaths()
-  file_path = context.request['tool_input']['file_path']
-  file_path = spackle._canonicalize_path(file_path)
-
-  message = f'You are not allowed to edit that file in {install.spackle}. Do not make a copy with your edits in a different location; ask me what you should do.'
-
-  if spackle._is_file_path_within(file_path, install.prompts):
-    context.deny(message)
-
-  if spackle._is_file_path_equal(file_path, install.user_md):
-    context.deny(message)
-
-  if spackle._is_file_path_equal(file_path, install.user_py):
-    context.deny(message)
-
-  context.allow()
-
 
 #######
 # CLI #
@@ -831,6 +874,60 @@ class CLI:
       print(f'Request failed: {e}', file=sys.stderr)
     except Exception as e:
       print(f'Unexpected error: {e}', file=sys.stderr)
+
+  @staticmethod
+  @click.group()
+  def repo():
+    """Manage external git repositories for spackle projects"""
+    pass
+
+  @staticmethod
+  @click.command()
+  @click.argument('url_or_path')
+  @click.option('--branch', '-b', help='Git branch to checkout')
+  def add(url_or_path, branch):
+    """Add a repository to spackle management
+
+    URL_OR_PATH can be:
+    - A git URL (https://github.com/user/repo.git)
+    - A local path to a git repository
+    """
+    config = RepoConfig()
+    try:
+      config.add_repository(url_or_path, branch)
+    except Exception as e:
+      print(f"Error adding repository: {e}", file=sys.stderr)
+      sys.exit(1)
+
+  @staticmethod
+  @click.command()
+  @click.argument('name')
+  def remove(name):
+    """Remove a repository from spackle management"""
+    config = RepoConfig()
+    if not config.remove_repository(name):
+      sys.exit(1)
+
+  @staticmethod
+  @click.command('list')
+  def list_repos():
+    """List all managed repositories"""
+    config = RepoConfig()
+    repositories = config.list_repositories()
+
+    if not repositories:
+      print("No repositories managed by spackle")
+      return
+
+    print("Managed repositories:")
+    for repo in repositories:
+      print(f"  - {repo.name}")
+      print(f"    URL: {repo.url}")
+      print(f"    Branch: {repo.branch}")
+      print(f"    Path: {repo.path}")
+      if repo.commit:
+        print(f"    Commit: {repo.commit[:8]}")
+      print()
 
   @staticmethod
   @click.command()
@@ -912,6 +1009,12 @@ cli.add_command(CLI.hook)
 cli.add_command(CLI.serve)
 cli.add_command(CLI.debug)
 cli.add_command(CLI.jira)
+cli.add_command(CLI.repo)
+
+# Register repo subcommands
+CLI.repo.add_command(CLI.add)
+CLI.repo.add_command(CLI.remove)
+CLI.repo.add_command(CLI.list_repos)
 
 
 ########

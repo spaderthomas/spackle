@@ -1,4 +1,5 @@
-# Overview
+Read the following files:
 @.spackle/prompts/persona.md
-@.spackle/prompts/rules.md
+@.spackle/prompts/read.md
+@.spackle/prompts/write.md
 @.spackle/spackle.md

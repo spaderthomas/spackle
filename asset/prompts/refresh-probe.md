@@ -1,0 +1,2 @@
+- ALWAYS to use the `probe` MCP when searching code. If it fails, fall back to your usual method.
+  - PREFER to read @.spackle/prompts/probe-usage-guide.md if you have not done so recently
