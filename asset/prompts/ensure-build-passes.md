@@ -1,0 +1,1 @@
+- NEVER finish until the build passes with no warnings and the unit tests pass with no failures
