@@ -147,6 +147,7 @@ class HookTool(enum.Enum):
   WebFetch = 'WebFetch'
   WebSearch = 'WebSearch'
 
+
 class HookEvent(enum.Enum):
   PreToolUse = 'PreToolUse'
   PostToolUse = 'PostToolUse'
@@ -204,7 +205,7 @@ class HookContext:
       self.allow(file.read())
 
   def deny_blacklist(self, blacklist: List[str], message: Optional[str]):
-    program  = self.request['tool_input']['command'].split(' ')[0]
+    program = self.request['tool_input']['command'].split(' ')[0]
     if program in blacklist:
       self.deny(message)
 
@@ -217,6 +218,7 @@ class HookContext:
 class Config:
   def __init__(self, blacklist: List[str] = []):
     self.blacklist = blacklist
+
 
 ###########
 # SPACKLE #
@@ -329,8 +331,20 @@ class Spackle:
     self._copy_tree(self.paths.prompts, install.prompts)
 
     # .spackle/spackle.*
-    self._copy_file(self.paths.user_md, install.user_md, force=False, log=True, flag='--overwrite-spackle')
-    self._copy_file(self.paths.user_py, install.user_py, force=False, log=True, flag='--overwrite-spackle')
+    self._copy_file(
+      self.paths.user_md,
+      install.user_md,
+      force=False,
+      log=True,
+      flag='--overwrite-spackle',
+    )
+    self._copy_file(
+      self.paths.user_py,
+      install.user_py,
+      force=False,
+      log=True,
+      flag='--overwrite-spackle',
+    )
 
     # Create vendor symlinks for managed repositories
     self._create_vendor_symlinks(install)
@@ -356,7 +370,9 @@ class Spackle:
         file_path = fn()
         file_path = os.path.join(install.root, file_path)
         if not os.path.exists(file_path):
-          raise ValueError(f'Warning: Prompt file {file_path} not found, skipping {name}')
+          raise ValueError(
+            f'Warning: Prompt file {file_path} not found, skipping {name}'
+          )
 
         shutil.copy2(file_path, os.path.join(claude.commands, f'{name}.md'))
 
@@ -559,7 +575,9 @@ class Spackle:
 
     # Create symlink to the entire cache directory
     os.symlink(repo_config.cache_dir, repos_symlink)
-    print(f"Created repos symlink: {self._color('repos/', self.colors.item)} -> {repo_config.cache_dir}")
+    print(
+      f'Created repos symlink: {self._color("repos/", self.colors.item)} -> {repo_config.cache_dir}'
+    )
 
   def _update_claude_md(self, claude_md_path: str) -> None:
     """Update CLAUDE.md non-destructively by adding spackle reference if not present"""
@@ -590,18 +608,9 @@ class Spackle:
     self._log_copy_action(mcp_config_path, force=False, flag='(non-destructive update)')
 
     spackle_servers = {
-      "spackle-main": {
-        "command": "spackle",
-        "args": ["serve", "main"]
-      },
-      "spackle-probe": {
-        "command": "spackle",
-        "args": ["serve", "probe"]
-      },
-      "spackle-sqlite": {
-        "command": "spackle",
-        "args": ["serve", "sqlite"]
-      }
+      'spackle-main': {'command': 'spackle', 'args': ['serve', 'main']},
+      'spackle-probe': {'command': 'spackle', 'args': ['serve', 'probe']},
+      'spackle-sqlite': {'command': 'spackle', 'args': ['serve', 'sqlite']},
     }
 
     if os.path.exists(mcp_config_path):
@@ -612,18 +621,18 @@ class Spackle:
         except json.JSONDecodeError:
           config = {}
 
-      if "mcpServers" not in config:
-        config["mcpServers"] = {}
+      if 'mcpServers' not in config:
+        config['mcpServers'] = {}
 
       # Add spackle servers (don't remove existing ones)
       for server_name, server_config in spackle_servers.items():
-        config["mcpServers"][server_name] = server_config
+        config['mcpServers'][server_name] = server_config
 
       with open(mcp_config_path, 'w') as f:
         json.dump(config, f, indent=2)
     else:
       # File doesn't exist - create it with our servers
-      config = {"mcpServers": spackle_servers}
+      config = {'mcpServers': spackle_servers}
       with open(mcp_config_path, 'w') as f:
         json.dump(config, f, indent=2)
 
@@ -738,6 +747,7 @@ def sp_refresh_instructions():
 def sp_refresh_user_instructions():
   return spackle.install.prompts + '/refresh-user-instructions.md'
 
+
 @spackle.prompt_file
 def spackle__sketch():
   return spackle.paths.prompts + '/sketch.md'
@@ -747,27 +757,22 @@ def spackle__sketch():
 # BUILT IN HOOKS #
 ##################
 @spackle.hook(
-  event = HookEvent.PreToolUse,
-  tools = [HookTool.Edit, HookTool.MultiEdit, HookTool.Write]
+  event=HookEvent.PreToolUse, tools=[HookTool.Edit, HookTool.MultiEdit, HookTool.Write]
 )
 def sp_refresh_write(context: HookContext):
   context.allow_with_prompt('refresh-write.md')
 
-@spackle.hook(
-  event = HookEvent.Stop
-)
+
+@spackle.hook(event=HookEvent.Stop)
 def sp_ensure_build_passes(context: HookContext):
   context.allow_with_prompt('ensure-build-passes.md')
 
-@spackle.hook(
-  event = HookEvent.PreToolUse,
-  tools = [HookTool.Bash]
-)
+
+@spackle.hook(event=HookEvent.PreToolUse, tools=[HookTool.Bash])
 def sp_ensure_correct_build(context: HookContext):
   if spackle.blacklist:
     context.deny_blacklist(spackle.blacklist, 'use the spackle mcp goddamnit')
   context.allow()
-
 
 
 ##################
@@ -805,6 +810,7 @@ def test() -> McpResult:
     stdout='',
   )
 
+
 #######
 # CLI #
 #######
@@ -815,7 +821,7 @@ class CLI:
     '--provider',
     type=click.Choice(['claude']),
     default='claude',
-    help='Provider to build for'
+    help='Provider to build for',
   )
   def build(provider):
     """Build configuration for provider and install spackle into ./spackle"""
@@ -896,7 +902,7 @@ class CLI:
     try:
       config.add_repository(url_or_path, branch)
     except Exception as e:
-      print(f"Error adding repository: {e}", file=sys.stderr)
+      print(f'Error adding repository: {e}', file=sys.stderr)
       sys.exit(1)
 
   @staticmethod
@@ -916,17 +922,17 @@ class CLI:
     repositories = config.list_repositories()
 
     if not repositories:
-      print("No repositories managed by spackle")
+      print('No repositories managed by spackle')
       return
 
-    print("Managed repositories:")
+    print('Managed repositories:')
     for repo in repositories:
-      print(f"  - {repo.name}")
-      print(f"    URL: {repo.url}")
-      print(f"    Branch: {repo.branch}")
-      print(f"    Path: {repo.path}")
+      print(f'  - {repo.name}')
+      print(f'    URL: {repo.url}')
+      print(f'    Branch: {repo.branch}')
+      print(f'    Path: {repo.path}')
       if repo.commit:
-        print(f"    Commit: {repo.commit[:8]}")
+        print(f'    Commit: {repo.commit[:8]}')
       print()
 
   @staticmethod

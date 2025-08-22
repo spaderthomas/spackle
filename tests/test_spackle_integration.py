@@ -24,7 +24,7 @@ def test_user_code_file(tmp_path):
   # Create the .spackle directory first
   spackle_dir = tmp_path / '.spackle'
   spackle_dir.mkdir(exist_ok=True)
-  
+
   test_code = """#!/usr/bin/env python
 
 import spackle
@@ -64,7 +64,7 @@ def test_spackle_build_with_user_code(temp_project_dir, test_user_code_file):
   # Setup project
   spackle_dir = temp_project_dir / '.spackle'
   spackle_dir.mkdir(exist_ok=True)
-  
+
   # Copy the test user code file to the temp project directory
   project_spackle_dir = temp_project_dir / '.spackle'
   project_spackle_dir.mkdir(exist_ok=True)
